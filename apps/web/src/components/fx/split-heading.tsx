@@ -6,6 +6,10 @@
  */
 export function SplitHeading({ as = 'h1', id, text, className }: { as?: 'h1' | 'h2'; id?: string; text: string; className?: string }) {
   const Tag = as
+  // Spread the stagger over the whole heading but cap it at STEPS * 25ms (+ 0.4s rise), so the heading is fully
+  // visible within ~650ms however long it is.
+  const STEPS = 10
+  const total = Math.max(1, [...text.replace(/ /g, '')].length - 1)
   let index = 0
   return (
     <Tag id={id} className={className}>
@@ -16,7 +20,7 @@ export function SplitHeading({ as = 'h1', id, text, className }: { as?: 'h1' | '
             {w > 0 ? ' ' : null}
             <span className="inline-block whitespace-nowrap">
               {[...word].map((char, c) => (
-                <span key={c} className="hero-char inline-block" style={{ '--i': index++ } as React.CSSProperties}>
+                <span key={c} className="hero-char inline-block" style={{ '--i': Math.round((index++ * STEPS) / total) } as React.CSSProperties}>
                   {char}
                 </span>
               ))}

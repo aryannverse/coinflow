@@ -50,7 +50,9 @@ export function Hero({ cta }: { cta: React.ReactNode }) {
                   height={900}
                   sizes="(min-width:1024px) 1024px, 100vw"
                   alt={SHOT_ALT}
+                  preload
                   fetchPriority="high"
+                  quality={70}
                   className="block size-full object-cover object-top"
                 />
               }
