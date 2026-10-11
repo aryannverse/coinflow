@@ -8,7 +8,8 @@ export const hasE2EUser = () => Boolean(process.env.E2E_CLERK_USER_EMAIL)
 export function e2eEmail(): string {
   const email = process.env.E2E_CLERK_USER_EMAIL
   if (!email) throw new Error('Set E2E_CLERK_USER_EMAIL in .env.local to a Clerk test user (an email containing +clerk_test).')
-  if (email === process.env.DEMO_CLERK_USER_EMAIL) throw new Error('E2E_CLERK_USER_EMAIL must not be the demo user: E2E wipes its rows.')
+  const norm = (v?: string) => v?.trim().toLowerCase()
+  if (norm(email) === norm(process.env.DEMO_CLERK_USER_EMAIL)) throw new Error('E2E_CLERK_USER_EMAIL must not be the demo user: E2E wipes its rows.')
   return email
 }
 

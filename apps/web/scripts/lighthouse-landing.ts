@@ -10,7 +10,7 @@
  * Lighthouse's functions that get serialised into the page, which then crash there with "__name is not defined".
  * It needs no .env, so there is no `@next/env` here.
  *
- * Env: LH_URL (default http://localhost:3100/), CHROME_PATH (default Playwright's Chromium), LH_WRITE_EVIDENCE=0 to skip the file.
+ * Env: LH_URL (default http://localhost:3100/), CHROME_PATH (default Playwright's Chromium), LH_WRITE_EVIDENCE=1 to also write the evidence file (off by default).
  */
 import { chromium } from '@playwright/test'
 import { launch } from 'chrome-launcher'
@@ -47,7 +47,7 @@ async function measure(port: number, preset: 'desktop' | 'mobile'): Promise<Scor
 }
 
 function writeEvidence(desktop: Scores, mobile: Scores, pass: boolean) {
-  if (process.env.LH_WRITE_EVIDENCE === '0') return
+  if (process.env.LH_WRITE_EVIDENCE !== '1') return // opt-in, so `pnpm verify` never dirties the tree
   const date = new Date().toLocaleDateString('en-CA')
   const section = [
     START,
