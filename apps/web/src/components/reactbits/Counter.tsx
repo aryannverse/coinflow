@@ -1,4 +1,4 @@
-// Source: React Bits Counter-TS-TW (reactbits.dev registry)
+// Source: React Bits Counter-TS-TW (reactbits.dev registry) (adapted: wrap-aware digit target, critically-damped spring for live entry)
 /* eslint-disable react-hooks/rules-of-hooks -- vendored: Digit returns early only for the '.' place, which is stable per key, so hook order never changes for a mounted instance */
 'use client';
 
@@ -47,14 +47,23 @@ function getValueRoundedToPlace(value: number, place: number): number {
   return Math.floor(normalizeNearInteger(scaled));
 }
 
+/** Near-critically damped (2·√stiffness = 60): settles in ~200 ms with no overshoot, so live typing never shows wrong digits. */
+const DEFAULT_SPRING = { stiffness: 900, damping: 60 };
+
+/** Shortest signed distance (−5..4) from `cur` to the same digit as `target` on a 0–9 wheel. */
+export function wrapDelta(cur: number, target: number): number {
+  return ((((target - cur + 5) % 10) + 10) % 10) - 5;
+}
+
 interface DigitProps {
   place: PlaceValue;
   value: number;
   height: number;
   digitStyle?: React.CSSProperties;
+  spring: { stiffness: number; damping: number };
 }
 
-function Digit({ place, value, height, digitStyle }: DigitProps) {
+function Digit({ place, value, height, digitStyle, spring }: DigitProps) {
   // Decimal point digit
   if (place === '.') {
     return (
@@ -69,10 +78,12 @@ function Digit({ place, value, height, digitStyle }: DigitProps) {
 
   // Numeric digit
   const valueRoundedToPlace = getValueRoundedToPlace(value, place);
-  const animatedValue = useSpring(valueRoundedToPlace);
+  const animatedValue = useSpring(valueRoundedToPlace % 10, spring);
 
   useEffect(() => {
-    animatedValue.set(valueRoundedToPlace);
+    // Wheel position is only ever read mod 10, so travel the short way round (≤ 5 steps) instead of to the absolute value.
+    const cur = animatedValue.get();
+    animatedValue.set(cur + wrapDelta(cur, valueRoundedToPlace % 10));
   }, [animatedValue, valueRoundedToPlace]);
 
   const defaultStyle: React.CSSProperties = {
@@ -115,6 +126,8 @@ interface CounterProps {
   gradientTo?: string;
   topGradientStyle?: React.CSSProperties;
   bottomGradientStyle?: React.CSSProperties;
+  /** Spring for the digit wheels. Defaults to near-critically damped. */
+  spring?: { stiffness: number; damping: number };
 }
 
 export default function Counter({
@@ -145,7 +158,8 @@ export default function Counter({
   gradientFrom = 'black',
   gradientTo = 'transparent',
   topGradientStyle,
-  bottomGradientStyle
+  bottomGradientStyle,
+  spring = DEFAULT_SPRING
 }: CounterProps) {
   const height = fontSize + padding;
 
@@ -191,7 +205,7 @@ export default function Counter({
     <span style={{ ...defaultContainerStyle, ...containerStyle }}>
       <span style={{ ...defaultCounterStyle, ...counterStyle }}>
         {places.map(place => (
-          <Digit key={place} place={place} value={value} height={height} digitStyle={digitStyle} />
+          <Digit key={place} place={place} value={value} height={height} digitStyle={digitStyle} spring={spring} />
         ))}
       </span>
       <span style={gradientContainerStyle}>

@@ -80,6 +80,7 @@ function useLedgerMutation<TVars, TRes extends Mutation>(
     onError: (err, vars, snapshot) => {
       for (const [key, data] of snapshot ?? []) qc.setQueryData(key, data)
       if (isSignedOut(err)) return
+      if (err instanceof ApiError && err.field) return // the form shows a field error inline
       toast.error(err instanceof ApiError ? err.message : 'Something went wrong.', {
         description: err instanceof ApiError && err.requestId ? `Ref ${err.requestId}` : undefined,
         // A still-saving temp id can never succeed on retry, so that message stands alone.

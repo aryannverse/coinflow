@@ -26,6 +26,7 @@ export function AskPill({ onOpenPalette }: { onOpenPalette: () => void }) {
           type="button"
           aria-label="Add expense"
           data-testid="ask-add"
+          data-quick-add-return
           onClick={() => quick.open()}
           className={`grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground active:scale-[0.95] lg:hidden ${ring} focus-visible:ring-offset-2 focus-visible:ring-offset-popover`}
         >

@@ -22,6 +22,7 @@ export function TopBar() {
         <Button
           onClick={() => quick.open()}
           aria-keyshortcuts="N"
+          data-quick-add-return
           className="hidden min-h-12 gap-2 rounded-chip px-4 active:scale-[0.97] lg:inline-flex"
         >
           <Plus className="size-4" aria-hidden /> Add <kbd className="font-mono text-xs opacity-70">N</kbd>

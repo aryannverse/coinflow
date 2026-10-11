@@ -8,7 +8,7 @@ const NEXT: Record<string, 1 | -1> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -
 
 /**
  * Category radiogroup with a roving tab stop: Tab enters on the selected chip (or the first),
- * arrows move and select, Space selects. Emoji stay in the accessible name ("🍜 Food & Dining").
+ * arrows move and select, Space selects. Emoji is decorative; the accessible name is the category name.
  */
 export function CategoryChips({ categories, value, onChange, invalid }: {
   categories: CategoryDTO[]; value: string | null; onChange: (id: string) => void; invalid?: boolean
@@ -44,7 +44,7 @@ export function CategoryChips({ categories, value, onChange, invalid }: {
               selected ? 'border-primary bg-primary text-primary-foreground' : 'bg-surface-2 hover:border-primary/50',
             )}
           >
-            <span>{c.emoji}</span> {c.name}
+            <span aria-hidden>{c.emoji}</span> {c.name}
           </motion.button>
         )
       })}
