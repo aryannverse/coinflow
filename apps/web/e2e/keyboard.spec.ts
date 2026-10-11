@@ -10,7 +10,7 @@ test('quick add is completable from the keyboard: N, amount, Tab to a category, 
   await expect(page.getByLabel('Amount')).toBeFocused() // quick add focuses the amount field itself
   await page.keyboard.type('450')
   await page.keyboard.press('Tab')
-  const first = page.getByRole('radio').first()
+  const first = page.getByRole('radiogroup', { name: 'Category' }).getByRole('radio').first() // not the Expense/Income toggle
   await expect(first).toBeFocused()
   await page.keyboard.press('Space')
   await expect(first).toBeChecked()

@@ -15,6 +15,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { ApiError } from '@/lib/api-client'
 import { keypadPress, parseAmountText } from '@/lib/keypad'
 import { formatINR, MAX_AMOUNT_PAISE, paiseToRupeeString, parseRupeesToPaise } from '@/lib/money'
+import { enterOnChoice } from '@/lib/quick-add-keys'
 import { buildPatch, isValidWhen } from '@/lib/quick-add-patch'
 import { cn } from '@/lib/utils'
 import { CategoryChips } from './category-chips'
@@ -77,6 +78,7 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
   const [fieldError, setFieldError] = useState<FieldError | null>(null)
   const [capped, setCapped] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
+  const saving = useRef(false) // set synchronously, so a quick double Enter cannot slip in before `pending` re-renders
 
   const categories = useCategories(type)
   const create = useCreateTransaction()
@@ -95,19 +97,23 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
     form.querySelector<HTMLElement>(FOCUS_TARGET[error.field])?.focus()
   }
 
-  async function save() {
-    if (pending) return
+  /** `chosen`: a category picked by the keystroke that saves (Enter on a chip), before state has caught up. */
+  async function save(chosen?: string) {
+    if (pending || saving.current) return
+    const cat = chosen ?? categoryId
     if (!paise) return fail({ field: 'amount', message: 'Enter an amount more than ₹0.' })
-    if (!categoryId) return fail({ field: 'categoryId', message: 'Pick a category.' })
+    if (!cat) return fail({ field: 'categoryId', message: 'Pick a category.' })
+    if (chosen) setCategoryId(chosen)
     // A cleared or half-typed When would make toISOString() throw; an untouched one is simply omitted.
     if (whenTouched && !isValidWhen(when)) return fail({ field: 'occurredAt', message: 'Pick a date and time.' })
     const cleanNote = note.trim() || null
+    saving.current = true
     try {
       if (editId) {
-        const patch = buildPatch(initial, { type, amount: paise, categoryId, note: cleanNote, method }, whenTouched, when)
+        const patch = buildPatch(initial, { type, amount: paise, categoryId: cat, note: cleanNote, method }, whenTouched, when)
         if (Object.keys(patch).length > 0) await update.mutateAsync({ id: editId, patch })
       } else {
-        await create.mutateAsync({ type, amount: paise, categoryId, note: cleanNote, method, ...(whenTouched ? { occurredAt: new Date(when).toISOString() } : {}) })
+        await create.mutateAsync({ type, amount: paise, categoryId: cat, note: cleanNote, method, ...(whenTouched ? { occurredAt: new Date(when).toISOString() } : {}) })
       }
       try { localStorage.setItem(LAST_METHOD_KEY, method) } catch { /* private mode: the default is only a convenience */ }
       onDone()
@@ -118,6 +124,8 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
       } else {
         fail({ field: 'form', message: 'Couldn’t save that. Please try again.' })
       }
+    } finally {
+      saving.current = false
     }
   }
 
@@ -148,7 +156,16 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
   const formError = errorOn('form') ?? (fieldError && !(fieldError.field in FOCUS_TARGET) ? fieldError.message : null)
 
   return (
-    <form ref={formRef} className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={(e) => { e.preventDefault(); void save() }}>
+    <form ref={formRef} className="flex min-h-0 flex-1 flex-col" noValidate
+      onSubmit={(e) => { e.preventDefault(); void save() }}
+      onKeyDown={(e) => {
+        // Keyboard-first logging: 450, Tab to a category, Space, Enter. A choice button's own Enter would only click it.
+        const action = enterOnChoice(e.nativeEvent, e.target as HTMLElement)
+        if (action === 'ignore') return
+        e.preventDefault()
+        if (action === 'submit') void save((e.target as HTMLElement).dataset.cat)
+      }}
+    >
       {/* Only this part scrolls; the close button (outside the form) and the Save row stay put. */}
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-4 pt-5 lg:gap-5 lg:px-6 lg:pt-6">
         <div className="flex flex-col gap-1.5 pr-12">
