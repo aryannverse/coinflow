@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildOptimisticTransaction, prependToFirstPage, removeFromPages } from './optimistic'
+import { buildOptimisticTransaction, isOptimisticId, prependToFirstPage, removeFromPages } from './optimistic'
 
 type Row = { id: string; n: number }
 const page = (ids: string[], nextCursor: string | null = null) => ({ data: ids.map((id, n) => ({ id, n })), nextCursor })
@@ -59,5 +59,12 @@ describe('buildOptimisticTransaction', () => {
       { type: 'income', amount: 100, categoryId: 'zzz', method: 'cash', occurredAt: '2026-10-10T00:00:00.000Z' }, undefined, now)
     expect(row).toMatchObject({ method: 'cash', occurredAt: '2026-10-10T00:00:00.000Z', note: null })
     expect(row.category.id).toBe('zzz')
+  })
+})
+
+describe('isOptimisticId', () => {
+  it('recognises temp ids only', () => {
+    expect(isOptimisticId('optimistic-1760000000000')).toBe(true)
+    expect(isOptimisticId('0b5c1c1e-6b0e-4a43-9c52-0d6e0c1f9a11')).toBe(false)
   })
 })

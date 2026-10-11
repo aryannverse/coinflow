@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createUndoStore, UNDO_VISIBLE_MS } from './undo-store'
+import { createUndoStore, resolveUndoTarget, UNDO_VISIBLE_MS } from './undo-store'
 
 describe('undo store', () => {
   it('keeps only the latest entry and notifies subscribers', () => {
@@ -48,5 +48,25 @@ describe('undo store', () => {
     off()
     s.push({ auditId: 'a', label: 'x' })
     expect(l).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolveUndoTarget', () => {
+  const entry = { auditId: 'a', label: 'x', createdAt: 0 }
+
+  it('undoes the toast own entry even when the store has already expired', () => {
+    expect(resolveUndoTarget(null, { auditId: 'a' }, false)).toEqual({ auditId: 'a', clearStore: false })
+  })
+
+  it('clears the store when it still holds the same entry, so Cmd+Z cannot repeat it', () => {
+    expect(resolveUndoTarget(entry, { auditId: 'a' }, false)).toEqual({ auditId: 'a', clearStore: true })
+  })
+
+  it('does not clear a newer entry in the store', () => {
+    expect(resolveUndoTarget({ ...entry, auditId: 'b' }, { auditId: 'a' }, false)).toEqual({ auditId: 'a', clearStore: false })
+  })
+
+  it('does nothing on a second click', () => {
+    expect(resolveUndoTarget(entry, { auditId: 'a' }, true)).toEqual({ auditId: null, clearStore: false })
   })
 })

@@ -8,7 +8,7 @@ import type {
   BudgetDTO, CategoryDTO, CheckinDTO, InsightsDTO, MeDTO, Mutation, RecurringDTO, SafeToSpendDTO, TransactionDTO,
 } from '@/lib/api-types'
 import { formatINR } from '@/lib/money'
-import { buildOptimisticTransaction, prependToFirstPage, removeFromPages } from '@/lib/optimistic'
+import { buildOptimisticTransaction, isOptimisticId, prependToFirstPage, removeFromPages } from '@/lib/optimistic'
 import type { MePatch } from '@/lib/schemas/me'
 import type { RecurringCreate, RecurringPatch } from '@/lib/schemas/recurring'
 import { undoStore } from '@/lib/undo-store'
@@ -35,6 +35,14 @@ function qs(f: Record<string, string | undefined>) {
   const p = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][])
   const s = p.toString()
   return s ? `?${s}` : ''
+}
+
+/** A 401 means the session ended: the provider redirects to sign-in, so no toast or Retry. */
+const isSignedOut = (err: unknown) => err instanceof ApiError && err.status === 401
+
+/** A temp row is still being created; its id means nothing to the server yet. */
+function assertSaved(id: string) {
+  if (isOptimisticId(id)) throw new ApiError('still_saving', 'Still saving — try again in a moment.', 0)
 }
 
 type Snapshot = [QueryKey, unknown][]
@@ -71,6 +79,7 @@ function useLedgerMutation<TVars, TRes extends Mutation>(
     },
     onError: (err, vars, snapshot) => {
       for (const [key, data] of snapshot ?? []) qc.setQueryData(key, data)
+      if (isSignedOut(err)) return
       toast.error(err instanceof ApiError ? err.message : 'Something went wrong.', {
         description: err instanceof ApiError && err.requestId ? `Ref ${err.requestId}` : undefined,
         action: { label: 'Retry', onClick: () => mutation.mutate(vars) },
@@ -133,12 +142,18 @@ export const useCreateTransaction = () =>
   )
 export const useUpdateTransaction = () =>
   useLedgerMutation(
-    ({ id, patch }: { id: string; patch: Partial<TxnInput> }) => api<Mutation<TransactionDTO>>(`/transactions/${id}`, { method: 'PATCH', json: patch }),
+    ({ id, patch }: { id: string; patch: Partial<TxnInput> }) => {
+      assertSaved(id)
+      return api<Mutation<TransactionDTO>>(`/transactions/${id}`, { method: 'PATCH', json: patch })
+    },
     () => 'Saved changes',
   )
 export const useDeleteTransaction = () =>
   useLedgerMutation(
-    (t: { id: string; amount: number }) => api<Mutation>(`/transactions/${t.id}`, { method: 'DELETE' }),
+    (t: { id: string; amount: number }) => {
+      assertSaved(t.id)
+      return api<Mutation>(`/transactions/${t.id}`, { method: 'DELETE' })
+    },
     (t) => `Deleted ${formatINR(t.amount)}`,
     [],
     dropRow,
@@ -174,7 +189,9 @@ export const useUpdateMe = () => {
       qc.setQueryData(qk.me, me)
       void qc.invalidateQueries({ queryKey: qk.sts })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Couldn’t save that.'),
+    onError: (err) => {
+      if (!isSignedOut(err)) toast.error(err instanceof ApiError ? err.message : 'Couldn’t save that.')
+    },
   })
 }
 
@@ -186,6 +203,8 @@ export const useUndo = () => {
       for (const key of [...LEDGER_KEYS, qk.recurring]) void qc.invalidateQueries({ queryKey: key })
       toast.success('Undone')
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Couldn’t undo that.'),
+    onError: (err) => {
+      if (!isSignedOut(err)) toast.error(err instanceof ApiError ? err.message : 'Couldn’t undo that.')
+    },
   })
 }

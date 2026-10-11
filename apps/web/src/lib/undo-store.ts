@@ -7,6 +7,20 @@ export interface UndoEntry {
 }
 
 /** Holds the single latest undoable change. It expires after UNDO_VISIBLE_MS and can be taken once. */
+/**
+ * Which audit id a visible toast's Undo button should fire. The toast can outlive the store's
+ * wall-clock window (sonner pauses on hover or when the tab is hidden), so it uses its OWN entry;
+ * the server is the authority on expiry. Fires at most once per toast.
+ */
+export function resolveUndoTarget(
+  storeCurrent: UndoEntry | null,
+  toastEntry: { auditId: string },
+  alreadyFired: boolean,
+): { auditId: string | null; clearStore: boolean } {
+  if (alreadyFired) return { auditId: null, clearStore: false }
+  return { auditId: toastEntry.auditId, clearStore: storeCurrent?.auditId === toastEntry.auditId }
+}
+
 export function createUndoStore(now: () => number = () => Date.now()) {
   let entry: UndoEntry | null = null
   const listeners = new Set<() => void>()

@@ -7,7 +7,7 @@ import { AnimatedCircularProgressBar } from '@/components/ui/animated-circular-p
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { useUndo } from '@/hooks/queries'
-import { UNDO_VISIBLE_MS, undoStore } from '@/lib/undo-store'
+import { resolveUndoTarget, UNDO_VISIBLE_MS, undoStore } from '@/lib/undo-store'
 import { useUndoShortcut } from './use-undo-shortcut'
 
 /** Seconds-left ring. Ticks once a second (a static ring) under reduced motion. */
@@ -38,6 +38,7 @@ export function UndoToaster() {
 
   useEffect(() => {
     if (!entry) return
+    let fired = false // per toast: a second click must not undo twice
     const id = toast.custom(
       (t) => (
         <div role="status" className="flex w-[min(92vw,380px)] items-center gap-3 rounded-tile border bg-popover p-3 text-popover-foreground shadow-lg">
@@ -46,7 +47,11 @@ export function UndoToaster() {
           <Button
             variant="secondary" className="min-h-12 min-w-12 px-4 active:scale-[0.97]"
             onClick={() => {
-              if (undoStore.take()) undoMutate(entry.auditId)
+              // The toast can outlive the store window (sonner pauses on hover/hidden tab), so undo its OWN entry.
+              const target = resolveUndoTarget(undoStore.current(), entry, fired)
+              fired = true
+              if (target.clearStore) undoStore.clear(entry.auditId)
+              if (target.auditId) undoMutate(target.auditId)
               toast.dismiss(t)
             }}
           >

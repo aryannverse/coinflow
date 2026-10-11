@@ -1,6 +1,10 @@
 import type { InfiniteData } from '@tanstack/react-query'
 import type { CategoryDTO, TransactionDTO } from './api-types'
 
+export const OPTIMISTIC_ID_PREFIX = 'optimistic-'
+/** True for a temporary row the server has not confirmed yet; such ids must never reach the API. */
+export const isOptimisticId = (id: string) => id.startsWith(OPTIMISTIC_ID_PREFIX)
+
 type Page<T> = { data: T[]; nextCursor: string | null }
 
 /** Prepends `row` to page 0 of a cached infinite list. Returns the input unchanged if nothing is cached. */
@@ -49,7 +53,7 @@ export function buildOptimisticTransaction(
 ): TransactionDTO {
   const stamp = now.toISOString()
   return {
-    id: `optimistic-${now.getTime()}`,
+    id: `${OPTIMISTIC_ID_PREFIX}${now.getTime()}`,
     userId: '',
     type: input.type,
     amount: input.amount,
