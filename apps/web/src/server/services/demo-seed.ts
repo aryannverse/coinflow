@@ -37,7 +37,8 @@ export async function seedDemoData(userId: string, now: Date = new Date()): Prom
   let count = 0
   for (let day = 60; day >= 0; day--) {
     const date = addDays(today, -day)
-    const picks = [SPENDS[day % SPENDS.length], ...(day % 3 === 0 ? [SPENDS[(day * 7) % SPENDS.length]] : [])]
+    // Second pick: (7d + 5) − d = 6d + 5 is odd, so with 12 spends it never lands on the first pick (no same-day duplicates).
+    const picks = [SPENDS[day % SPENDS.length], ...(day % 3 === 0 ? [SPENDS[(day * 7 + 5) % SPENDS.length]] : [])]
     for (const [name, note, amount] of picks) {
       await createTransaction(userId, {
         type: 'expense', amount: amount + (day % 5) * 1_000, categoryId: cat(name), note,
