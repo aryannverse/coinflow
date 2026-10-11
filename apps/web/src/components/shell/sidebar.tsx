@@ -13,6 +13,7 @@ const ring = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring
 export function Sidebar() {
   const path = usePathname()
   const collapsed = useSyncExternalStore(sidebarStore.subscribe, sidebarStore.get, sidebarStore.server)
+  const animated = useSyncExternalStore(sidebarStore.subscribe, sidebarStore.animated, sidebarStore.animatedServer)
 
   return (
     <TooltipProvider>
@@ -21,7 +22,8 @@ export function Sidebar() {
         aria-label="Main"
         data-collapsed={collapsed}
         className={cn(
-          'sticky top-0 hidden h-dvh shrink-0 flex-col gap-1 border-r bg-card/40 p-3 transition-[width] duration-200 motion-reduce:transition-none lg:flex',
+          'sticky top-0 hidden h-dvh shrink-0 flex-col gap-1 border-r bg-card/40 p-3 lg:flex',
+          animated && 'transition-[width] duration-200 motion-reduce:transition-none',
           collapsed ? 'w-[76px]' : 'w-60',
         )}
       >
@@ -67,7 +69,7 @@ export function Sidebar() {
               type="button"
               aria-expanded={!collapsed}
               aria-controls="app-sidebar"
-              aria-label="Toggle sidebar"
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               onClick={() => sidebarStore.set(!collapsed)}
               className={cn(
                 'flex min-h-12 w-full items-center gap-3 rounded-chip px-3 text-sm text-muted-foreground transition-colors hover:bg-surface-2 active:scale-[0.98]',
@@ -76,7 +78,7 @@ export function Sidebar() {
               )}
             >
               {collapsed ? <PanelLeftOpen className="size-5" aria-hidden /> : <PanelLeftClose className="size-5" aria-hidden />}
-              {!collapsed && <span aria-hidden>Collapse</span>}
+              {!collapsed && <span>Collapse</span>}
             </button>
           )
           return (

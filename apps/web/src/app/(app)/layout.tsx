@@ -5,6 +5,7 @@ import { ThemeSync } from '@/components/shell/theme-sync'
 import { toISTDate } from '@/lib/dates'
 import { requireCurrentUser } from '@/server/auth'
 import { AppError } from '@/server/errors'
+import { logger } from '@/server/logger'
 import { materializeDueRecurring } from '@/server/services/recurring'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -13,7 +14,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     throw err
   })
   if (!user.onboardedAt) redirect('/onboarding')
-  await materializeDueRecurring(user.id, toISTDate(new Date()))
+  try {
+    await materializeDueRecurring(user.id, toISTDate(new Date()))
+  } catch (err) {
+    // Due recurring items are a convenience; a failure here must not take the whole app down.
+    logger.error({ err, userId: user.id }, 'materializeDueRecurring failed in (app) layout')
+  }
   return (
     <AppProviders motionPref={user.reducedMotion}>
       <ThemeSync theme={user.theme} />

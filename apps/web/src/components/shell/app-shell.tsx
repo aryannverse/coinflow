@@ -15,7 +15,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const openPalette = useCallback(() => setPalette(true), [])
   return (
     <QuickAddProvider>
-      <OfflineBanner />
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-chip focus:bg-primary focus:p-3 focus:text-primary-foreground"
@@ -26,6 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
+          <OfflineBanner />
           <main id="main" tabIndex={-1} className="mx-auto w-full max-w-6xl flex-1 px-4 pb-44 pt-6 outline-none lg:px-8 lg:pb-28">
             {children}
           </main>
@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <BottomTabs />
       <CommandPalette open={palette} onOpenChange={setPalette} />
       <QuickAddSheet />
-      <Shortcuts onPalette={openPalette} />
+      <Shortcuts paletteOpen={palette} onPalette={openPalette} />
     </QuickAddProvider>
   )
 }

@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useState } from 'react'
 import { useQuickAdd } from '@/components/quick-add/quick-add-provider'
-import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import { useCategories } from '@/hooks/queries'
+import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { useCategories, useUpdateMe } from '@/hooks/queries'
 import { formatINR } from '@/lib/money'
+import { paletteFilter } from '@/lib/palette-filter'
 import { parseQuickCommand } from '@/lib/quick-command'
 import { NAV_ITEMS } from './nav-items'
 
@@ -15,6 +16,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const router = useRouter()
   const quick = useQuickAdd()
   const { setTheme, resolvedTheme } = useTheme()
+  const updateMe = useUpdateMe()
   const { data: categories = [] } = useCategories()
   const parsed = parseQuickCommand(text, categories)
   const cat = categories.find((c) => c.id === parsed?.categoryId)
@@ -30,12 +32,13 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
 
   return (
     <CommandDialog open={open} onOpenChange={handleOpenChange} title="Ask Coinflow" description="Add an expense, jump to a page, or search">
+      <Command filter={paletteFilter}>
       <CommandInput placeholder="“250 food lunch”, “+5000 salary”, or search…" value={text} onValueChange={setText} />
       <CommandList>
         <CommandEmpty>Try starting with an amount, like “120 chai”.</CommandEmpty>
         {parsed && (
           <CommandGroup heading="Quick add">
-            <CommandItem value={`add ${text}`} onSelect={() => run(() => quick.open(parsed))} className="min-h-12">
+            <CommandItem forceMount value={`add ${text.trim()}`} onSelect={() => run(() => quick.open(parsed))} className="min-h-12">
               <Plus className="text-primary" aria-hidden />
               {parsed.type === 'income' ? 'Add income' : 'Add expense'} {formatINR(parsed.amount)}
               {cat ? ` · ${cat.emoji} ${cat.name}` : ''}
@@ -45,7 +48,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         )}
         {text.trim() && !parsed && (
           <CommandGroup heading="Search">
-            <CommandItem value={`search ${text}`} onSelect={() => run(() => router.push(`/activity?q=${encodeURIComponent(text.trim())}`))} className="min-h-12">
+            <CommandItem forceMount value={`search ${text.trim()}`} onSelect={() => run(() => router.push(`/activity?q=${encodeURIComponent(text.trim())}`))} className="min-h-12">
               <Search aria-hidden /> Search activity for “{text.trim()}”
             </CommandItem>
           </CommandGroup>
@@ -58,11 +61,16 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
           ))}
         </CommandGroup>
         <CommandGroup heading="Preferences">
-          <CommandItem value="toggle theme" onSelect={() => run(() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'))} className="min-h-12">
+          <CommandItem value="toggle theme" onSelect={() => run(() => {
+            const next = resolvedTheme === 'dark' ? 'light' : 'dark'
+            setTheme(next)
+            updateMe.mutate({ theme: next })
+          })} className="min-h-12">
             <Moon aria-hidden /> Switch to {resolvedTheme === 'dark' ? 'light' : 'dark'} theme
           </CommandItem>
         </CommandGroup>
       </CommandList>
+      </Command>
     </CommandDialog>
   )
 }

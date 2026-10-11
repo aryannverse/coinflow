@@ -10,12 +10,14 @@ function subscribe(cb: () => void) {
   }
 }
 
+/** Lives below the TopBar. The live region is always mounted; only its text comes and goes, so it is announced. */
 export function OfflineBanner() {
   const online = useSyncExternalStore(subscribe, () => navigator.onLine, () => true)
-  if (online) return null
   return (
-    <div role="status" className="sticky top-0 z-50 bg-surface-2 px-4 py-2 text-center text-sm">
-      You’re offline — changes will sync when you’re back.
+    <div role="status" className="sticky top-16 z-20">
+      {!online && (
+        <p className="bg-surface-2 px-4 py-2 text-center text-sm">You’re offline — changes will sync when you’re back.</p>
+      )}
     </div>
   )
 }
