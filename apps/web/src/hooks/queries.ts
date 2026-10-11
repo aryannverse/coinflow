@@ -95,7 +95,8 @@ function useLedgerMutation<TVars, TRes extends Mutation>(
   return mutation
 }
 
-export const useMe = () => useQuery({ queryKey: qk.me, queryFn: () => api<{ data: MeDTO }>('/me').then((r) => r.data) })
+export const useMe = (initial?: MeDTO) =>
+  useQuery({ queryKey: qk.me, queryFn: () => api<{ data: MeDTO }>('/me').then((r) => r.data), initialData: initial })
 export const useCategories = (kind?: 'expense' | 'income') =>
   useQuery({ queryKey: qk.categories(kind), queryFn: () => api<{ data: CategoryDTO[] }>(`/categories${qs({ kind })}`).then((r) => r.data), staleTime: 300_000 })
 export const useSafeToSpend = (initial?: SafeToSpendDTO) =>
@@ -186,7 +187,8 @@ export const useDeleteBudget = () =>
 export const useCheckin = () =>
   useLedgerMutation((v: { amount: number }) => api<Mutation<CheckinDTO>>('/checkins', { method: 'POST', json: v }), (v) => `Balance set to ${formatINR(v.amount)}`)
 
-export const useUpdateMe = () => {
+/** `inlineFieldErrors`: the caller shows a 422 beside its field, so no toast is raised for errors that name a field. */
+export const useUpdateMe = ({ inlineFieldErrors = false }: { inlineFieldErrors?: boolean } = {}) => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (patch: MePatch) => api<{ data: MeDTO }>('/me', { method: 'PATCH', json: patch }).then((r) => r.data),
@@ -195,7 +197,9 @@ export const useUpdateMe = () => {
       void qc.invalidateQueries({ queryKey: qk.sts })
     },
     onError: (err) => {
-      if (!isSignedOut(err)) toast.error(err instanceof ApiError ? err.message : 'Couldn’t save that.')
+      if (isSignedOut(err)) return
+      if (inlineFieldErrors && err instanceof ApiError && err.field) return
+      toast.error(err instanceof ApiError ? err.message : 'Couldn’t save that.')
     },
   })
 }
