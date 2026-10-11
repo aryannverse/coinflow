@@ -16,6 +16,7 @@ export function occurrencesInRange(
   let d = nextDueOn
   let guard = 0
   while (d < from && guard++ < MAX_OCCURRENCES) d = nextOccurrence(d, cadence, anchorDay)
+  if (d < from) return []
   while (d <= to && out.length < MAX_OCCURRENCES) {
     out.push(d)
     d = nextOccurrence(d, cadence, anchorDay)

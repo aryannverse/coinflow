@@ -24,4 +24,7 @@ describe('recurrence', () => {
   it('returns nothing when the first occurrence is after the range', () => {
     expect(occurrencesInRange('2026-11-05', 'monthly', 5, '2026-10-11', '2026-10-31')).toEqual([])
   })
+  it('never returns a date before the range when the schedule is very stale', () => {
+    expect(occurrencesInRange('2018-01-01', 'weekly', 1, '2026-10-11', '2026-10-31')).toEqual([])
+  })
 })
