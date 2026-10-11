@@ -38,7 +38,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         <CommandEmpty>Try starting with an amount, like “120 chai”.</CommandEmpty>
         {parsed && (
           <CommandGroup heading="Quick add">
-            <CommandItem forceMount value={`add ${text.trim()}`} onSelect={() => run(() => quick.open(parsed))} className="min-h-12">
+            <CommandItem value={`add ${text.trim()}`} onSelect={() => run(() => quick.open(parsed))} className="min-h-12">
               <Plus className="text-primary" aria-hidden />
               {parsed.type === 'income' ? 'Add income' : 'Add expense'} {formatINR(parsed.amount)}
               {cat ? ` · ${cat.emoji} ${cat.name}` : ''}
@@ -48,7 +48,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
         )}
         {text.trim() && !parsed && (
           <CommandGroup heading="Search">
-            <CommandItem forceMount value={`search ${text.trim()}`} onSelect={() => run(() => router.push(`/activity?q=${encodeURIComponent(text.trim())}`))} className="min-h-12">
+            <CommandItem value={`search ${text.trim()}`} onSelect={() => run(() => router.push(`/activity?q=${encodeURIComponent(text.trim())}`))} className="min-h-12">
               <Search aria-hidden /> Search activity for “{text.trim()}”
             </CommandItem>
           </CommandGroup>

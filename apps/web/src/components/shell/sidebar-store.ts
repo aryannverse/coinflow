@@ -6,11 +6,16 @@ let interacted = false // width transitions only run after the user toggles, nev
 /** localStorage-backed boolean read through useSyncExternalStore (no setState-in-effect, no hydration flash of a wrong value). */
 export const sidebarStore = {
   subscribe(cb: () => void) {
+    // Another tab wrote the preference: localStorage is the truth again, so drop the session fallback.
+    const onStorage = () => {
+      mem = null
+      cb()
+    }
     listeners.add(cb)
-    window.addEventListener('storage', cb)
+    window.addEventListener('storage', onStorage)
     return () => {
       listeners.delete(cb)
-      window.removeEventListener('storage', cb)
+      window.removeEventListener('storage', onStorage)
     }
   },
   get(): boolean {
