@@ -35,9 +35,10 @@ export async function upsertUserFromProfile(p: UserProfile): Promise<User> {
   } catch (err) {
     if (pgErrorCode(err) === '23505' && pgConstraint(err) === EMAIL_UNIQUE_CONSTRAINT) {
       // A first page load fires several requests at once and each inserts the same new user. Postgres can report the
-      // loser's clash on the email index before the id arbiter, so if this id now has a row, that was the race, not a stranger.
+      // loser's clash on the email index before the id arbiter. It is that race only if this id now has a row with THIS
+      // email; an existing user moving onto an email another account holds must still be refused.
       const winner = await getUser(p.id)
-      if (winner) return winner
+      if (winner && winner.email === p.email) return winner
       throw conflict('email_in_use', 'This email is already linked to another Coinflow account.')
     }
     throw err

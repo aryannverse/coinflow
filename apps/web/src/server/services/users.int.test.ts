@@ -65,6 +65,15 @@ describe('users service', () => {
     expect(await getUser('user_new')).toBeNull()
   })
 
+  it('refuses an existing user moving to an email another account holds, without touching either row', async () => {
+    await makeUser('user_x', { email: 'a@example.com' })
+    await makeUser('user_y', { email: 'b@example.com' })
+    await expect(upsertUserFromProfile({ id: 'user_x', email: 'b@example.com', name: 'X', avatarUrl: null }))
+      .rejects.toMatchObject({ status: 409, code: 'email_in_use' })
+    expect(await getUser('user_x')).toMatchObject({ email: 'a@example.com' })
+    expect(await getUser('user_y')).toMatchObject({ email: 'b@example.com' })
+  })
+
   it('concurrent first requests for one new user all resolve to the same row (no false email_in_use)', async () => {
     // A first page load fires the layout, RSC and API requests at once; each sees "no row yet" and upserts.
     for (let round = 0; round < 15; round++) {
