@@ -4,7 +4,8 @@ import { Check, ChevronRight } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { Tile } from '@/components/fx/tile'
 import { CheckinDialog } from '@/components/home/checkin-dialog'
 import { LabeledInput } from '@/components/onboarding/steps/labeled-input'
@@ -12,7 +13,7 @@ import { useMotionPref } from '@/components/providers/motion-pref'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useMe, useUpdateMe } from '@/hooks/queries'
+import { qk, useMe, useUpdateMe } from '@/hooks/queries'
 import { ApiError } from '@/lib/api-client'
 import type { MeDTO } from '@/lib/api-types'
 import type { MotionPref } from '@/lib/motion-pref'
@@ -22,8 +23,15 @@ import { cn } from '@/lib/utils'
 import { UpiQrUpload } from './upi-qr-upload'
 
 type Scope = 'you' | 'upi' | 'look'
-/** `idle` is what to say when the patch is empty and nothing is sent. */
-type Commit = (patch: MePatch, scope: Scope, text: string, idle?: string) => Promise<{ ok: true } | { ok: false; field?: string; message?: string }>
+/** One entry per control that can have a save in flight. */
+type Key = 'you' | 'upi' | 'theme' | 'motion'
+type Result = { ok: true } | { ok: false; message: string; field?: string; local?: ProfileErrors }
+/**
+ * A save. `build` runs when the job reaches the front of the queue, against the latest confirmed profile, so a patch
+ * is never diffed against a stale `me`. `idle` is what to say when there is nothing to send.
+ */
+type Job = { key: Key; scope: Scope; build: (me: MeDTO) => { patch: MePatch; errors?: ProfileErrors }; saved: string; idle?: string }
+type Commit = (job: Job) => Promise<Result>
 
 const FIELD_ID: Record<ProfileField, string> = {
   name: 'p-name',
@@ -33,7 +41,9 @@ const FIELD_ID: Record<ProfileField, string> = {
   upiId: 'p-upiid',
 }
 const FIELD_ORDER: ProfileField[] = ['name', 'paydayDay', 'monthlyIncome', 'fixedCostsEstimate', 'upiId']
-const isField = (f: string | undefined): f is ProfileField => !!f && f in FIELD_ID
+const YOU_FIELDS = ['name', 'paydayDay', 'monthlyIncome', 'fixedCostsEstimate'] as const
+type YouField = (typeof YOU_FIELDS)[number]
+const isYouField = (f: string | undefined): f is YouField => YOU_FIELDS.some((k) => k === f)
 const focusField = (f: ProfileField) => document.getElementById(FIELD_ID[f])?.focus()
 
 const THEMES = [
@@ -50,28 +60,49 @@ type ThemeValue = (typeof THEMES)[number]['value']
 const isTheme = (v: string | undefined): v is ThemeValue => THEMES.some((t) => t.value === v)
 
 const choiceClass =
-  'min-h-12 flex-1 rounded-chip border px-3 active:scale-[0.97] data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
+  'min-h-12 flex-1 gap-1.5 rounded-chip border px-3 active:scale-[0.97] data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
 
 /** Polite live region, always mounted so a change in text is announced. Shows a tick beside the words. */
 function SaveNote({ text }: { text: string }) {
   return (
     <p role="status" className="flex min-h-6 items-center gap-1.5 text-sm text-muted-foreground">
-      {text && <Check className="size-4 text-primary" aria-hidden />}
+      {text.replace(/​/g, '') && <Check className="size-4 text-primary" aria-hidden />}
       {text}
     </p>
   )
 }
 
-/** The mounted form re-reads `me` only when it is keyed anew (see ProfileView), so state starts from the saved profile. */
+const youValues = (me: MeDTO): Record<YouField, string> => {
+  const p = profileValues(me)
+  return { name: p.name, paydayDay: p.paydayDay, monthlyIncome: p.monthlyIncome, fixedCostsEstimate: p.fixedCostsEstimate }
+}
+/** Does this text already mean what is saved (so it can be shown the way the server stores it)? */
+const sameAsSaved = (me: MeDTO, k: ProfileField, text: string) => {
+  const r = buildMePatch(me, { [k]: text })
+  return !(k in r.patch) && !r.errors[k]
+}
+
+/**
+ * Not remounted when a save lands (that would drop focus and typing). Instead, when the saved profile changes,
+ * each field that the user has not edited since (or whose text already means the saved value) is refreshed in place.
+ */
 function YouForm({ me, commit, pending, onDirty, note }: { me: MeDTO; commit: Commit; pending: boolean; onDirty: () => void; note: string }) {
-  const [values, setValues] = useState(() => {
-    const p = profileValues(me)
-    return { name: p.name, paydayDay: p.paydayDay, monthlyIncome: p.monthlyIncome, fixedCostsEstimate: p.fixedCostsEstimate }
-  })
+  const fresh = youValues(me)
+  const [values, setValues] = useState(fresh)
+  const [seen, setSeen] = useState(fresh)
   const [errors, setErrors] = useState<ProfileErrors>({})
   const [formError, setFormError] = useState('')
 
-  const edit = (k: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  if (YOU_FIELDS.some((k) => fresh[k] !== seen[k])) {
+    const next = { ...values }
+    for (const k of YOU_FIELDS) {
+      if (fresh[k] !== seen[k] && (values[k] === seen[k] || sameAsSaved(me, k, values[k]))) next[k] = fresh[k]
+    }
+    setValues(next)
+    setSeen(fresh)
+  }
+
+  const edit = (k: YouField) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setValues((v) => ({ ...v, [k]: e.target.value }))
     setErrors((prev) => (prev[k] ? { ...prev, [k]: undefined } : prev))
     setFormError('')
@@ -80,32 +111,26 @@ function YouForm({ me, commit, pending, onDirty, note }: { me: MeDTO; commit: Co
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    if (pending) return
-    const { patch, errors: local } = buildMePatch(me, values)
-    const first = FIELD_ORDER.find((f) => local[f])
-    if (first) {
-      setErrors(local)
-      focusField(first)
-      return
-    }
-    setErrors({})
     setFormError('')
-    if (Object.keys(patch).length === 0) {
-      void commit({}, 'you', '', 'No changes to save.')
+    const res = await commit({ key: 'you', scope: 'you', build: (current) => buildMePatch(current, values), saved: 'Saved', idle: 'No changes to save.' })
+    if (res.ok) {
+      setErrors({})
       return
     }
-    const res = await commit(patch, 'you', 'Saved')
-    if (res.ok || !res.message) return
-    if (isField(res.field)) {
+    if (res.local) {
+      setErrors(res.local)
+      const first = FIELD_ORDER.find((f) => res.local?.[f])
+      if (first) focusField(first)
+    } else if (isYouField(res.field)) {
       setErrors({ [res.field]: res.message })
       focusField(res.field)
-    } else {
-      setFormError(res.message)
+    } else if (res.field) {
+      setFormError(res.message) // a field with no input here: say so rather than fail silently
     }
   }
 
   return (
-    <form className="mt-3 flex flex-col gap-4" onSubmit={save} noValidate>
+    <form className="mt-3 flex flex-col gap-4" onSubmit={(e) => void save(e)} noValidate>
       <LabeledInput id="p-name" label="Name" value={values.name} onChange={edit('name')} error={errors.name} autoComplete="name" hint="Shown in Coinflow. Your sign-in account keeps its own name." />
       <div className="grid gap-4 sm:grid-cols-2">
         <LabeledInput id="p-payday" label="Payday" value={values.paydayDay} onChange={edit('paydayDay')} error={errors.paydayDay} inputMode="numeric" hint="Day of the month, 1 to 31." />
@@ -118,7 +143,7 @@ function YouForm({ me, commit, pending, onDirty, note }: { me: MeDTO; commit: Co
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" className="min-h-12 rounded-chip px-6 active:scale-[0.97]" aria-disabled={pending || undefined}>
+        <Button id="p-save" type="submit" className="min-h-12 rounded-chip px-6 active:scale-[0.97]">
           {pending ? 'Saving…' : 'Save'}
         </Button>
         <SaveNote text={note} />
@@ -127,19 +152,34 @@ function YouForm({ me, commit, pending, onDirty, note }: { me: MeDTO; commit: Co
   )
 }
 
-/** Saves on blur, and only when the ID changed. A value the server turned down is not re-sent until it is edited. */
-function UpiIdField({ me, commit, onDirty, note }: { me: MeDTO; commit: Commit; onDirty: () => void; note: string }) {
-  const [value, setValue] = useState(me.upiId ?? '')
+/**
+ * Saves on blur, and only when the ID changed. A value the server turned down is not re-sent until it is edited.
+ * Never remounted by a save: while the field is focused, what the user is typing wins over the value that just landed.
+ */
+function UpiIdField({ me, commit, pending, onDirty, note }: { me: MeDTO; commit: Commit; pending: boolean; onDirty: () => void; note: string }) {
+  const saved = me.upiId ?? ''
+  const [value, setValue] = useState(saved)
+  const [seen, setSeen] = useState(saved)
+  const [focused, setFocused] = useState(false)
   const [error, setError] = useState('')
   const rejected = useRef<string | null>(null)
 
+  if (saved !== seen) {
+    setSeen(saved)
+    if (!focused) setValue(saved)
+  }
+
   async function onBlur() {
+    setFocused(false)
     const raw = value.trim()
     if (raw === rejected.current) return
-    const { patch } = buildMePatch(me, { upiId: value })
-    if (!('upiId' in patch)) return
-    const res = await commit({ upiId: patch.upiId }, 'upi', raw ? 'UPI ID saved' : 'UPI ID removed')
-    if (res.ok || !res.message) return
+    const res = await commit({
+      key: 'upi',
+      scope: 'upi',
+      build: (current) => ({ patch: buildMePatch(current, { upiId: raw }).patch }),
+      saved: raw ? 'UPI ID saved' : 'UPI ID removed',
+    })
+    if (res.ok || !res.field) return
     rejected.current = raw
     setError(res.message)
     focusField('upiId')
@@ -157,6 +197,7 @@ function UpiIdField({ me, commit, onDirty, note }: { me: MeDTO; commit: Commit; 
           rejected.current = null
           onDirty()
         }}
+        onFocus={() => setFocused(true)}
         onBlur={() => void onBlur()}
         error={error}
         autoCapitalize="none"
@@ -164,50 +205,115 @@ function UpiIdField({ me, commit, onDirty, note }: { me: MeDTO; commit: Commit; 
         placeholder="name@okaxis"
         hint="Saves when you leave the field."
       />
-      <SaveNote text={note} />
+      <SaveNote text={pending ? 'Saving…' : note} />
     </div>
   )
 }
 
 const noopSubscribe = () => () => {}
 
-function LookAndFeel({ me, commit, note }: { me: MeDTO; commit: Commit; note: string }) {
+/**
+ * Theme and motion apply on the device at once, then save. If the save fails, the control goes back to the last value
+ * the server confirmed (`lastGood`), unless the user has already picked something else since.
+ */
+function LookAndFeel({ me, commit, pending, note, onDirty }: { me: MeDTO; commit: Commit; pending: { theme: boolean; motion: boolean }; note: string; onDirty: () => void }) {
   const { theme, setTheme } = useTheme()
   const { pref, setPref } = useMotionPref()
   // next-themes only knows the device's choice after hydration; until then show the saved profile value.
   const mounted = useSyncExternalStore(noopSubscribe, () => true, () => false)
   const themeValue = mounted && isTheme(theme) ? theme : me.theme
+  const [error, setError] = useState('')
+  const desiredTheme = useRef<string | null>(null)
+  const goodTheme = useRef<ThemeValue | null>(null)
+  const desiredMotion = useRef<MotionPref | null>(null)
+  const goodMotion = useRef<MotionPref | null>(null)
+
+  const failure = (res: Extract<Result, { ok: false }>) => `${res.message || 'Couldn’t save that.'} Your previous setting is back.`
+
+  async function chooseTheme(v: ThemeValue) {
+    const label = THEMES.find((t) => t.value === v)?.label
+    desiredTheme.current = v
+    goodTheme.current ??= themeValue
+    setError('')
+    onDirty()
+    setTheme(v)
+    const res = await commit({
+      key: 'theme',
+      scope: 'look',
+      build: (current) => ({ patch: current.theme === v ? {} : { theme: v } }),
+      saved: `Theme: ${label}. Saved`,
+      idle: `Theme: ${label}.`,
+    })
+    if (res.ok) {
+      goodTheme.current = v
+      return
+    }
+    if (desiredTheme.current !== v) return // the user has moved on; that choice is what counts now
+    setTheme(goodTheme.current ?? me.theme)
+    desiredTheme.current = goodTheme.current
+    setError(failure(res))
+  }
+
+  async function chooseMotion(v: MotionPref) {
+    const label = MOTION.find((m) => m.value === v)?.label
+    desiredMotion.current = v
+    goodMotion.current ??= pref
+    setError('')
+    onDirty()
+    setPref(v)
+    const res = await commit({
+      key: 'motion',
+      scope: 'look',
+      build: (current) => ({ patch: current.reducedMotion === v ? {} : { reducedMotion: v } }),
+      saved: `Reduce motion: ${label}. Saved`,
+      idle: `Reduce motion: ${label}.`,
+    })
+    if (res.ok) {
+      goodMotion.current = v
+      return
+    }
+    if (desiredMotion.current !== v) return
+    setPref(goodMotion.current ?? me.reducedMotion)
+    desiredMotion.current = goodMotion.current
+    setError(failure(res))
+  }
 
   return (
     <>
       <div className="mt-3 flex flex-col gap-2">
         <p id="p-theme-label" className="font-medium">Theme</p>
-        <ToggleGroup type="single" value={themeValue} aria-labelledby="p-theme-label" className="w-full" onValueChange={(v) => {
-          if (!isTheme(v)) return
-          setTheme(v)
-          const label = THEMES.find((t) => t.value === v)?.label
-          void commit(v === me.theme ? {} : { theme: v }, 'look', `Theme: ${label}. Saved`, `Theme: ${label}.`)
-        }}>
+        <ToggleGroup type="single" value={themeValue} aria-labelledby="p-theme-label" aria-busy={pending.theme || undefined} className="w-full" onValueChange={(v) => { if (isTheme(v)) void chooseTheme(v) }}>
           {THEMES.map((t) => (
-            <ToggleGroupItem key={t.value} value={t.value} className={choiceClass}>{t.label}</ToggleGroupItem>
+            <ToggleGroupItem key={t.value} value={t.value} className={choiceClass}>
+              {themeValue === t.value && <Check aria-hidden />}
+              {t.label}
+            </ToggleGroupItem>
           ))}
         </ToggleGroup>
       </div>
       <div className="mt-5 flex flex-col gap-2">
         <p id="p-motion-label" className="font-medium">Reduce motion</p>
-        <ToggleGroup type="single" value={pref} aria-labelledby="p-motion-label" aria-describedby="p-motion-hint" className="w-full" onValueChange={(v) => {
+        <ToggleGroup type="single" value={pref} aria-labelledby="p-motion-label" aria-describedby="p-motion-hint" aria-busy={pending.motion || undefined} className="w-full" onValueChange={(v) => {
           const next = MOTION.find((m) => m.value === v)
-          if (!next) return
-          setPref(next.value satisfies MotionPref)
-          void commit(next.value === me.reducedMotion ? {} : { reducedMotion: next.value }, 'look', `Reduce motion: ${next.label}. Saved`, `Reduce motion: ${next.label}.`)
+          if (next) void chooseMotion(next.value)
         }}>
           {MOTION.map((m) => (
-            <ToggleGroupItem key={m.value} value={m.value} className={choiceClass}>{m.label}</ToggleGroupItem>
+            <ToggleGroupItem key={m.value} value={m.value} className={choiceClass}>
+              {pref === m.value && <Check aria-hidden />}
+              {m.label}
+            </ToggleGroupItem>
           ))}
         </ToggleGroup>
         <p id="p-motion-hint" className="text-sm text-muted-foreground">On calms animation and turns off smooth scrolling and moving backgrounds. Match device follows your system setting.</p>
       </div>
-      <div className="mt-2"><SaveNote text={note} /></div>
+      <div className="mt-2 flex flex-col gap-1">
+        {error && (
+          <p role="alert" className="text-sm text-neutral-negative">
+            {error}
+          </p>
+        )}
+        <SaveNote text={note} />
+      </div>
     </>
   )
 }
@@ -232,29 +338,57 @@ function ProfileSkeleton() {
 export function ProfileView({ initial }: { initial?: MeDTO }) {
   const { data: me, isError, refetch } = useMe(initial)
   const update = useUpdateMe({ inlineFieldErrors: true })
-  const [note, setNote] = useState<{ scope: Scope; text: string } | null>(null)
+  const qc = useQueryClient()
+  const [note, setNote] = useState<{ scope: Scope; text: string; n: number } | null>(null)
+  const [busy, setBusy] = useState<Record<Key, boolean>>({ you: false, upi: false, theme: false, motion: false })
+  const inflight = useRef<Record<Key, number>>({ you: 0, upi: 0, theme: 0, motion: 0 })
+  const queue = useRef<Promise<unknown>>(Promise.resolve())
+  const nonce = useRef(0)
 
-  // mutateAsync, not mutate: the keyed forms remount when the saved profile changes, and per-call callbacks do not survive that.
-  const commit = useCallback<Commit>(
-    async (patch, scope, text, idle = '') => {
-      if (Object.keys(patch).length === 0) {
-        setNote({ scope, text: idle }) // nothing to send, so nothing to claim was saved
-        return { ok: true }
-      }
+  const track = (key: Key, by: 1 | -1) => {
+    inflight.current[key] += by
+    setBusy((b) => ({ ...b, [key]: inflight.current[key] > 0 }))
+  }
+  const say = (scope: Scope, text: string) => setNote({ scope, text, n: ++nonce.current })
+
+  /**
+   * Every save goes through one queue, so none is dropped and none is diffed against a stale profile: each job
+   * builds its patch from the latest confirmed `me` when its turn comes. mutateAsync, not mutate: per-call
+   * callbacks do not fire once the caller has unmounted. Field errors come back to the caller; the hook toasts the rest.
+   */
+  const commit: Commit = (job) => {
+    const overlapped = inflight.current[job.key] > 0
+    track(job.key, 1)
+    setNote(null) // clear first so the same words announce again next time
+    const run = async (): Promise<Result> => {
       try {
-        await update.mutateAsync(patch)
-        setNote({ scope, text })
+        const current = qc.getQueryData<MeDTO>(qk.me)
+        if (!current) return { ok: false, message: 'Your profile isn’t loaded yet.' }
+        const { patch, errors } = job.build(current)
+        if (errors && Object.keys(errors).length > 0) return { ok: false, message: '', local: errors }
+        if (Object.keys(patch).length === 0) {
+          // A second click right behind a save finds nothing left to send; keep that save's "Saved" on screen.
+          if (!overlapped) say(job.scope, job.idle ?? '')
+          return { ok: true }
+        }
+        try {
+          await update.mutateAsync(patch)
+        } catch (err) {
+          const message = err instanceof ApiError ? err.message : 'Couldn’t save that.'
+          return { ok: false, message, field: err instanceof ApiError ? err.field : undefined }
+        }
+        say(job.scope, job.saved)
         return { ok: true }
-      } catch (err) {
-        setNote(null)
-        // Field errors are shown beside the field; anything else was already toasted by the hook.
-        return err instanceof ApiError && err.field ? { ok: false, field: err.field, message: err.message } : { ok: false }
+      } finally {
+        track(job.key, -1)
       }
-    },
-    [update],
-  )
-  const clear = useCallback(() => setNote(null), [])
-  const noteFor = (s: Scope) => (note?.scope === s ? note.text : '')
+    }
+    const result = queue.current.then(run)
+    queue.current = result.catch(() => undefined)
+    return result
+  }
+  const clear = () => setNote(null)
+  const noteFor = (s: Scope) => (note?.scope === s ? note.text + (note.n % 2 ? '​' : '') : '')
 
   if (!me) {
     if (!isError) return <ProfileSkeleton />
@@ -267,8 +401,6 @@ export function ProfileView({ initial }: { initial?: MeDTO }) {
     )
   }
 
-  // Keyed by the values each form starts from, so a save re-reads them, but a theme or motion change does not reset typing.
-  const youKey = [me.name, me.paydayDay, me.monthlyIncome, me.fixedCostsEstimate].join('|')
   const initialLetter = (me.name.trim()[0] ?? me.email[0] ?? '?').toUpperCase()
 
   return (
@@ -288,7 +420,7 @@ export function ProfileView({ initial }: { initial?: MeDTO }) {
               <p className="text-sm text-muted-foreground">Your photo and email come from your sign-in account.</p>
             </div>
           </div>
-          <YouForm key={youKey} me={me} commit={commit} pending={update.isPending} onDirty={clear} note={noteFor('you')} />
+          <YouForm me={me} commit={commit} pending={busy.you} onDirty={clear} note={noteFor('you')} />
           <div className="mt-5 flex flex-col gap-2 border-t pt-4">
             <p className="text-sm text-muted-foreground">Moved money around? Tell Coinflow what’s in your account right now.</p>
             <div><CheckinDialog trigger={<Button type="button" variant="secondary" className="min-h-12 rounded-chip px-4 active:scale-[0.97]">Refresh balance</Button>} /></div>
@@ -298,14 +430,14 @@ export function ProfileView({ initial }: { initial?: MeDTO }) {
         <Tile spotlight={false} aria-labelledby="p-upi">
           <h2 id="p-upi" className="font-display text-xl font-bold">UPI</h2>
           <div className="mt-3 flex flex-col gap-4">
-            <UpiIdField key={me.upiId ?? ''} me={me} commit={commit} onDirty={clear} note={noteFor('upi')} />
+            <UpiIdField me={me} commit={commit} pending={busy.upi} onDirty={clear} note={noteFor('upi')} />
             <UpiQrUpload />
           </div>
         </Tile>
 
         <Tile spotlight={false} aria-labelledby="p-prefs">
           <h2 id="p-prefs" className="font-display text-xl font-bold">Look & feel</h2>
-          <LookAndFeel me={me} commit={commit} note={noteFor('look')} />
+          <LookAndFeel me={me} commit={commit} pending={busy} onDirty={clear} note={noteFor('look')} />
         </Tile>
 
         <Tile spotlight={false} aria-labelledby="p-data">
