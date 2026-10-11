@@ -65,6 +65,15 @@ describe('users service', () => {
     expect(await getUser('user_new')).toBeNull()
   })
 
+  it('concurrent first requests for one new user all resolve to the same row (no false email_in_use)', async () => {
+    // A first page load fires the layout, RSC and API requests at once; each sees "no row yet" and upserts.
+    for (let round = 0; round < 15; round++) {
+      const profile = { id: `user_race_${round}`, email: `race${round}@example.com`, name: 'Asha', avatarUrl: null }
+      const rows = await Promise.all(Array.from({ length: 6 }, () => upsertUserFromProfile(profile)))
+      expect(new Set(rows.map((r) => r.id))).toEqual(new Set([profile.id]))
+    }
+  })
+
   it('updateMe with an empty patch returns the unchanged row', async () => {
     const before = await makeUser('user_a')
     expect(await updateMe('user_a', {})).toEqual(before)
