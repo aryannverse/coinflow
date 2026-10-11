@@ -4,9 +4,15 @@ import { HeroBackground } from '@/components/fx/hero-background'
 import { AmountTicker } from '@/components/fx/amount-ticker'
 import { SplitHeading } from '@/components/fx/split-heading'
 import { Safari } from '@/components/ui/safari'
+import { formatINR } from '@/lib/money'
 
-// Keep in sync with the screenshot: update after running `pnpm shot:landing` against the real demo user.
-const SHOT_ALT = 'Coinflow Home screen: Safe to spend ₹36,721.71, two upcoming bills, today’s spending, top category Food & Dining and recent spends.'
+/**
+ * The Safe-to-spend figure the product shot shows, in paise. ONE source for the alt text and the floating
+ * badge, so the landing page never shows two different numbers. Update it from the value
+ * `pnpm shot:landing` prints after recapturing `public/landing/home-dark.png` against the demo user.
+ */
+export const SHOT_STS_PAISE = 3_672_100
+export const SHOT_ALT = `Coinflow Home screen: Safe to spend ${formatINR(SHOT_STS_PAISE)}, two upcoming bills, today’s spending, top category Food & Dining and recent spends.`
 
 /** `cta` is a server-rendered slot (Clerk `Show` picks Start free / Open Coinflow) so it is in the first HTML. */
 export function Hero({ cta }: { cta: React.ReactNode }) {
@@ -62,7 +68,7 @@ export function Hero({ cta }: { cta: React.ReactNode }) {
             <span aria-hidden className="grid size-9 place-items-center rounded-full bg-lime text-sm font-bold text-[#0F1210]">₹</span>
             <div>
               <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">Safe to spend</p>
-              <AmountTicker paise={1_845_000} className="block text-xl font-bold leading-tight sm:text-2xl" />
+              <AmountTicker paise={SHOT_STS_PAISE} className="block text-xl font-bold leading-tight sm:text-2xl" />
             </div>
           </div>
         </div>

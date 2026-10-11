@@ -52,13 +52,15 @@ export function MoneyFlow() {
   const beam = resolvedTheme === 'light' ? FLOW_PATH.light : FLOW_PATH.dark
 
   return (
-    <section id="how" aria-labelledby="flow-title" className="mx-auto max-w-6xl scroll-mt-16 px-4 py-24 sm:py-32">
+    <section id="how" aria-labelledby="flow-title" className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
       <h2 id="flow-title" className="text-balance text-center font-display text-4xl font-bold tracking-tight sm:text-5xl">
         Your money, in one honest number
       </h2>
       <p className="mx-auto mt-4 max-w-xl text-pretty text-center text-lg text-muted-foreground">
         Income comes in. Bills and basics are set aside first. What’s left is safe to spend — every day until payday.
       </p>
+      {/* Illustrative figures, labelled as such so they are not read as the product shot's Safe-to-spend. */}
+      <p className="mt-3 text-center font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">e.g. a ₹90,000 month</p>
       <div
         ref={container}
         className="relative mt-16 grid grid-cols-1 items-center gap-6 md:grid-cols-[1fr_5rem_1fr_5rem_1fr] md:gap-0"

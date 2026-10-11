@@ -6,7 +6,8 @@
  * `DEMO_CLERK_USER_EMAIL=<that email>` in `.env.local`. Usage: `pnpm shot:landing`.
  * (It deliberately signs in as the demo user, not the E2E user.)
  *
- * After recapturing, update `SHOT_ALT` in `src/components/landing/hero.tsx` so the alt text matches what the image shows.
+ * After recapturing, set `SHOT_STS` in `src/components/landing/hero.tsx` to the Safe-to-spend value this script prints
+ * (it drives both the alt text and the floating badge), and check the rest of `SHOT_ALT` against the image.
  * Prefer capturing against `next start`; the injected style below also hides the dev indicator.
  */
 import * as nextEnv from '@next/env'
@@ -33,6 +34,8 @@ async function main() {
     // Hide the Next dev indicator so it never ends up in the screenshot (a `next start` build has none).
     await page.addStyleTag({ content: 'nextjs-portal { display: none !important }' })
     await page.screenshot({ path: 'public/landing/home-dark.png' })
+    const sts = await page.locator('#sts-title').locator('xpath=ancestor::section[1]').locator('[data-amount]').first().getAttribute('data-amount')
+    console.log(`Captured public/landing/home-dark.png. Safe to spend shown: ${sts}`)
   } finally {
     await browser.close()
   }
