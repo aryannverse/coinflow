@@ -11,3 +11,11 @@
 # OS generated
 Thumbs.db
 .DS_Store
+
+# Coinflow
+node_modules/
+.next/
+apps/web/uploads/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/.env.local

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: coinflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coinflow
+      POSTGRES_PASSWORD: coinflow
+      POSTGRES_DB: coinflow
+    ports:
+      - "5436:5432"
+    volumes:
+      - coinflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinflow -d coinflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  coinflow_pgdata:
