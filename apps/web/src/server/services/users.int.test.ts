@@ -44,4 +44,49 @@ describe('users service', () => {
     expect(u.upiId).toBe('asha@okhdfc')
     expect(u.onboardedAt).toBeInstanceOf(Date)
   })
+
+  it('upsert refreshes updatedAt', async () => {
+    const before = await makeUser('user_a')
+    const u = await upsertUserFromProfile({ id: 'user_a', email: before.email, name: 'Asha', avatarUrl: null })
+    expect(u.updatedAt.getTime()).toBeGreaterThanOrEqual(before.updatedAt.getTime())
+  })
+
+  it('reports an email already linked to another account as a 409 without touching the old row', async () => {
+    await makeUser('user_old', { email: 'dup@example.com' })
+    clerkState.userId = 'user_new'
+    clerkState.email = 'dup@example.com'
+    await expect(requireCurrentUser()).rejects.toMatchObject({ status: 409, code: 'email_in_use' })
+    expect(await getUser('user_old')).toMatchObject({ email: 'dup@example.com' })
+    expect(await getUser('user_new')).toBeNull()
+  })
+
+  it('updateMe with an empty patch returns the unchanged row', async () => {
+    const before = await makeUser('user_a')
+    expect(await updateMe('user_a', {})).toEqual(before)
+  })
+
+  it('updateMe rejects with 404 when the user does not exist', async () => {
+    await expect(updateMe('ghost', {})).rejects.toMatchObject({ status: 404 })
+    await expect(updateMe('ghost', { paydayDay: 5 })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('updateMe keeps the first onboardedAt when onboarded=true is sent again', async () => {
+    await makeUser('user_a')
+    const first = await updateMe('user_a', { onboarded: true })
+    await new Promise((r) => setTimeout(r, 20))
+    const second = await updateMe('user_a', { onboarded: true })
+    expect(second.onboardedAt).toEqual(first.onboardedAt)
+  })
+
+  it('updateMe clears onboardedAt when onboarded=false', async () => {
+    await makeUser('user_a')
+    await updateMe('user_a', { onboarded: true })
+    expect((await updateMe('user_a', { onboarded: false })).onboardedAt).toBeNull()
+  })
+
+  it('updateMe validates the patch itself', async () => {
+    await makeUser('user_a')
+    await expect(updateMe('user_a', { paydayDay: 99 })).rejects.toThrow()
+    await expect(updateMe('user_a', { email: 'x@y.z' } as never)).rejects.toThrow()
+  })
 })

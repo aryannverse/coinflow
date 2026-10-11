@@ -53,4 +53,22 @@ describe('POST /api/webhooks/clerk', () => {
     const res = await POST(signed({ type: 'user.created', data: clerkUser('x', 'x@example.com'), object: 'event' }, other))
     expect(res.status).toBe(400)
   })
+
+  it('skips (200) a user.created whose email belongs to another account', async () => {
+    await makeUser('user_old', { email: 'dup@example.com' })
+    const evt = { type: 'user.created', data: clerkUser('user_new', 'dup@example.com'), object: 'event' }
+    const res = await POST(signed(evt))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, skipped: 'email_in_use' })
+    expect(await getUser('user_new')).toBeNull()
+    expect(await getUser('user_old')).not.toBeNull()
+  })
+
+  it('ignores (200) a signed user.created with a malformed payload', async () => {
+    const data = { ...clerkUser('user_bad', 'bad@example.com'), email_addresses: undefined }
+    const res = await POST(signed({ type: 'user.created', data, object: 'event' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, ignored: 'malformed' })
+    expect(await getUser('user_bad')).toBeNull()
+  })
 })
