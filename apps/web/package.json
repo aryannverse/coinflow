@@ -14,7 +14,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:seed:demo": "tsx --conditions=react-server scripts/seed-demo.ts",
     "shot:landing": "tsx scripts/capture-landing-shot.ts",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build"
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:int && pnpm build && pnpm e2e && pnpm lh",
+    "e2e": "playwright test",
+    "lh": "start-server-and-test 'next start -p 3100' http://localhost:3100 'node --no-warnings scripts/lighthouse-landing.ts'"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.14",
@@ -59,10 +61,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "chrome-launcher": "^1.2.2",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "lighthouse": "^13.5.0",
+    "start-server-and-test": "^3.0.13",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "5.9.3",
