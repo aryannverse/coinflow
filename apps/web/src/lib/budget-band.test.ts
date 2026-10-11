@@ -18,4 +18,9 @@ describe('budgetBand', () => {
     expect(budgetBand(0, 0)).toEqual({ pct: 0, overBy: 0, label: '₹0 of ₹0 · 0%' })
     expect(budgetBand(1_000, 0).overBy).toBe(1_000)
   })
+  it('rounds the percentage down, so nearly-there is never shown as 100%', () => {
+    expect(budgetBand(498_000, 500_000).pct).toBe(99)
+    expect(budgetBand(499_999, 500_000).label).toBe('₹4,999.99 of ₹5,000 · 99%')
+    expect(budgetBand(57, 100).pct).toBe(57) // 0.57 * 100 is 56.99999999999999 in floating point
+  })
 })

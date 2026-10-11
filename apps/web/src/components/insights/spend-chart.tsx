@@ -9,6 +9,8 @@ import { cumulativeTotals, fillDays } from '@/lib/fill-days'
 import { formatINR } from '@/lib/money'
 
 const TICK = { fill: 'var(--muted-foreground)', fontSize: 12 }
+const TICK_TOTAL = { fill: 'var(--chart-2)', fontSize: 12 }
+const title = (value: string, fill: string, angle: number) => ({ value, angle, position: 'insideLeft' as const, fill, fontSize: 12, offset: 8, style: { textAnchor: 'middle' as const } })
 
 /** Daily spend as bars (left axis) with the running total as a line (right axis). Zero days are drawn, not skipped. */
 export function SpendChart({ data }: { data: InsightsDTO }) {
@@ -35,9 +37,9 @@ export function SpendChart({ data }: { data: InsightsDTO }) {
   }
 
   return (
-    <figure aria-labelledby="spend-chart-title" aria-describedby="spend-chart-summary">
+    <figure aria-labelledby="spend-chart-title">
       <figcaption id="spend-chart-title" className="font-display text-xl font-bold">Daily spending</figcaption>
-      <p id="spend-chart-summary" className="mt-1 text-sm text-muted-foreground">{summary}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
       <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground" aria-label="Legend">
         <li className="flex items-center gap-2"><span aria-hidden className="h-3 w-3 rounded-sm bg-chart-1" />Daily spend (left axis)</li>
         <li className="flex items-center gap-2"><span aria-hidden className="h-0.5 w-4 rounded-full bg-chart-2" />Running total (right axis)</li>
@@ -55,8 +57,8 @@ export function SpendChart({ data }: { data: InsightsDTO }) {
               interval="preserveStartEnd"
               minTickGap={28}
             />
-            <YAxis yAxisId="day" domain={[0, 'auto']} tickLine={false} axisLine={false} width={52} tick={TICK} tickFormatter={(v) => compactINR(Number(v) * 100)} />
-            <YAxis yAxisId="total" orientation="right" domain={[0, 'auto']} tickLine={false} axisLine={false} width={52} tick={TICK} tickFormatter={(v) => compactINR(Number(v) * 100)} />
+            <YAxis yAxisId="day" domain={[0, 'auto']} tickLine={false} axisLine={false} width={64} tick={TICK} label={title('Per day', 'var(--muted-foreground)', -90)} tickFormatter={(v) => compactINR(Number(v) * 100)} />
+            <YAxis yAxisId="total" orientation="right" domain={[0, 'auto']} tickLine={false} axisLine={false} width={64} tick={TICK_TOTAL} label={{ value: 'Running total', angle: 90, position: 'insideRight', fill: 'var(--chart-2)', fontSize: 12, offset: 8, style: { textAnchor: 'middle' } }} tickFormatter={(v) => compactINR(Number(v) * 100)} />
             <Tooltip
               cursor={{ fill: 'var(--surface-2)' }}
               contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--popover-foreground)' }}

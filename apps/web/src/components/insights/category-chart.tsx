@@ -28,9 +28,9 @@ export function CategoryChart({ data }: { data: InsightsDTO }) {
   const top = rows[0]
   const summary = `Spending by category ${caption}. ${top.amount > 0 ? `Most on ${top.name}, ${formatINR(top.amount)}.` : 'Nothing spent in this range.'}`
   return (
-    <figure aria-labelledby="cat-title" aria-describedby="cat-caption">
+    <figure aria-labelledby="cat-title">
       <figcaption id="cat-title" className="font-display text-xl font-bold">By category</figcaption>
-      <p id="cat-caption" className="mt-1 text-sm text-muted-foreground">{caption}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{caption}</p>
       <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground" aria-label="Legend">
         <li className="flex items-center gap-2"><span aria-hidden className="h-3 w-5 rounded-sm bg-chart-1" />This period</li>
         <li className="flex items-center gap-2">
