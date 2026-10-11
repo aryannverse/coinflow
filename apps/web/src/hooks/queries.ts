@@ -1,6 +1,6 @@
 'use client'
 import {
-  useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient, type QueryKey,
+  useInfiniteQuery, keepPreviousData, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient, type QueryKey,
 } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api-client'
@@ -106,6 +106,8 @@ export const useTransactions = (filters: TxnFilters) =>
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api<TxnPage>(`/transactions${qs({ ...filters, cursor: pageParam })}`),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // A filter change keeps the old list on screen (flagged isPlaceholderData) instead of flashing a skeleton.
+    placeholderData: keepPreviousData,
   })
 export const useDrafts = (initial?: TransactionDTO[]) =>
   useQuery({ queryKey: qk.drafts, queryFn: () => api<{ data: TransactionDTO[] }>('/transactions?status=draft').then((r) => r.data), initialData: initial })

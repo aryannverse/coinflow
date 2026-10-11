@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { ProgressiveBlur } from '@/components/ui/progressive-blur'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDeleteTransaction, useTransactions, type TxnFilters } from '@/hooks/queries'
-import { hasFilters, parseFilters, serializeFilters } from '@/lib/activity-filters'
+import { hasFilters, isReversedRange, parseFilters, serializeFilters } from '@/lib/activity-filters'
 import type { TransactionDTO } from '@/lib/api-types'
 import { toISTDate } from '@/lib/dates'
 import { dayLabel, groupByDay } from '@/lib/group-by-day'
@@ -44,7 +44,9 @@ export function ActivityView() {
   }
 
   const q = useTransactions(filters)
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = q
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, isPlaceholderData, isFetchNextPageError } = q
+  // While a new filter loads, the old list stays (dimmed). Its cursor belongs to the old filter, so paging is off.
+  const canPage = Boolean(hasNextPage) && !isPlaceholderData
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.data) ?? [], [q.data])
   const groups = useMemo(() => groupByDay(items), [items])
   const today = toISTDate(new Date())
@@ -54,11 +56,12 @@ export function ActivityView() {
   const sentinel = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = sentinel.current
-    if (!el || !hasNextPage || isFetchingNextPage) return
+    // A failed page must not retry in a loop: the inline Retry button is the way forward.
+    if (!el || !canPage || isFetchingNextPage || isFetchNextPageError) return
     const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) void fetchNextPage() }, { rootMargin: '200px' })
     io.observe(el)
     return () => io.disconnect()
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+  }, [canPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage])
 
   // After a delete, focus must not fall to <body>: it goes to the next row, else the previous one, else the heading.
   const heading = useRef<HTMLHeadingElement>(null)
@@ -88,7 +91,7 @@ export function ActivityView() {
           <p role="status" className="sr-only">Loading activity</p>
           {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-14 rounded-chip" />)}
         </div>
-      ) : q.isError ? (
+      ) : q.isError && !q.data ? (
         <div className="rounded-tile border bg-card p-8 text-center" role="alert">
           <p className="text-muted-foreground">Couldn’t load your transactions.</p>
           <Button onClick={() => void q.refetch()} className="mt-3 min-h-12 active:scale-[0.97]">Try again</Button>
@@ -97,7 +100,9 @@ export function ActivityView() {
         <div className="rounded-tile border bg-card p-8 text-center">
           {filtered ? (
             <>
-              <p className="text-muted-foreground">No transactions match these filters.</p>
+              <p className="text-muted-foreground">
+                No transactions match these filters.{isReversedRange(filters) && ' Check your date range.'}
+              </p>
               <Button variant="outline" onClick={clear} className="mt-3 min-h-12 active:scale-[0.97]">Clear filters</Button>
             </>
           ) : (
@@ -108,7 +113,7 @@ export function ActivityView() {
           )}
         </div>
       ) : (
-        <div className="relative">
+        <div className={`relative transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`} aria-busy={isPlaceholderData ? true : undefined}>
           {groups.map((g) => (
             <div key={g.date} className="mb-4">
               <h2 id={`d-${g.date}`} className="sticky top-16 z-10 flex justify-between bg-background/90 py-2 text-sm backdrop-blur">
@@ -124,11 +129,20 @@ export function ActivityView() {
               </ul>
             </div>
           ))}
-          {hasNextPage && <div ref={sentinel} className="h-px" aria-hidden />}
-          <div className="flex justify-center py-2">
-            {hasNextPage && (
-              <Button variant="outline" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage} className={`min-h-12 min-w-12 px-4 active:scale-[0.97] ${RING}`}>
-                {isFetchingNextPage ? 'Loading…' : 'Load more'}
+          {canPage && <div ref={sentinel} className="h-px" aria-hidden />}
+          <div className="flex flex-col items-center gap-2 py-2">
+            {isFetchNextPageError && !isFetchingNextPage && (
+              <p role="alert" className="text-sm text-muted-foreground">Couldn’t load more.</p>
+            )}
+            {canPage && (
+              // aria-disabled, not disabled: a focused button keeps focus while the next page loads.
+              <Button
+                variant="outline"
+                aria-disabled={isFetchingNextPage || undefined}
+                onClick={() => { if (!isFetchingNextPage) void fetchNextPage() }}
+                className={`min-h-12 min-w-12 px-4 active:scale-[0.97] aria-disabled:opacity-50 ${RING}`}
+              >
+                {isFetchingNextPage ? 'Loading…' : isFetchNextPageError ? 'Retry' : 'Load more'}
               </Button>
             )}
           </div>

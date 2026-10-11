@@ -6,10 +6,41 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useCategories, type TxnFilters } from '@/hooks/queries'
-import { hasFilters, METHODS } from '@/lib/activity-filters'
+import { hasFilters, isRealDay, METHODS } from '@/lib/activity-filters'
 
 const SEARCH_DEBOUNCE_MS = 300
 const FIELD = 'flex flex-col gap-1 text-xs text-muted-foreground'
+
+/**
+ * A date input keeps its own text while typing: a half-typed year (0002, 0020, 0202) is a valid browser value but not one
+ * worth sending. Only a real day in range, or an empty field, reaches the URL.
+ */
+function DateField({ label, value, min, max, onCommit }: { label: string; value?: string; min?: string; max?: string; onCommit: (v: string | undefined) => void }) {
+  const [draft, setDraft] = useState(value ?? '')
+  const [seen, setSeen] = useState(value)
+  if (value !== seen) {
+    setSeen(value)
+    setDraft(value ?? '')
+  }
+  return (
+    <label className={FIELD}>
+      {label}
+      <Input
+        type="date"
+        value={draft}
+        min={min}
+        max={max}
+        onChange={(e) => {
+          const v = e.target.value
+          setDraft(v)
+          if (!v) onCommit(undefined)
+          else if (isRealDay(v)) onCommit(v)
+        }}
+        className="min-h-12 text-foreground"
+      />
+    </label>
+  )
+}
 
 type Props = {
   /** Filters as the URL has them. The URL is the single source of truth. */
@@ -46,7 +77,9 @@ export function FiltersBar({ value, onChange, onClear }: Props) {
     }, SEARCH_DEBOUNCE_MS)
   }
 
+  const [resetKey, setResetKey] = useState(0)
   const clear = () => {
+    setResetKey((k) => k + 1) // also drops any half-typed date
     clearTimeout(timer.current) // a half-typed search must not come back after Clear
     setDraft('')
     setEmitted('')
@@ -112,14 +145,8 @@ export function FiltersBar({ value, onChange, onClear }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:flex">
-        <label className={FIELD}>
-          From
-          <Input type="date" value={value.from ?? ''} max={value.to} onChange={(e) => onChange({ from: e.target.value || undefined })} className="min-h-12 text-foreground" />
-        </label>
-        <label className={FIELD}>
-          To
-          <Input type="date" value={value.to ?? ''} min={value.from} onChange={(e) => onChange({ to: e.target.value || undefined })} className="min-h-12 text-foreground" />
-        </label>
+        <DateField key={`from-${resetKey}`} label="From" value={value.from} max={value.to} onCommit={(v) => onChange({ from: v })} />
+        <DateField key={`to-${resetKey}`} label="To" value={value.to} min={value.from} onCommit={(v) => onChange({ to: v })} />
       </div>
 
       {hasFilters(value) && (

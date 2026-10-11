@@ -66,13 +66,13 @@ export function TransactionRow({ t, onDelete }: { t: TransactionDTO; onDelete: (
           </span>
           <span className={`amount shrink-0 ${t.type === 'income' ? 'text-primary' : ''}`}>{t.type === 'expense' ? '−' : '+'}{amount}</span>
         </button>
-        {/* Desktop: appears on hover or focus. Touch: kept for keyboard and screen readers, shown when focused; swipe is the sighted shortcut. */}
-        <div className="max-lg:sr-only max-lg:focus-within:not-sr-only lg:opacity-0 lg:transition-opacity lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
+        {/* Always visible on touch (the non-drag way to delete, WCAG 2.5.7); on desktop it appears on hover or focus. */}
+        <div className="shrink-0 lg:opacity-0 lg:transition-opacity lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
           <button
             type="button"
             onClick={() => onDelete(t)}
             aria-label={`Delete ${name} ${amount}`}
-            className={`grid size-12 place-items-center rounded-chip hover:bg-accent active:scale-[0.97] ${RING}`}
+            className={`grid size-12 place-items-center rounded-chip text-muted-foreground hover:bg-accent hover:text-foreground active:scale-[0.97] ${RING}`}
           >
             <Trash2 className="size-4" aria-hidden />
           </button>

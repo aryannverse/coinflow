@@ -17,7 +17,26 @@ describe('groupByDay', () => {
   })
 })
 
+describe('groupByDay with out-of-order rows', () => {
+  it('merges a backdated row that sits at the top into its day', () => {
+    const groups = groupByDay([
+      t('backdated', '2026-10-11T08:00:00Z', 100), // optimistic row, Oct 11, prepended
+      t('now', '2026-10-12T06:00:00Z', 200),
+      t('earlier', '2026-10-11T05:00:00Z', 300),
+    ])
+    expect(groups.map((g) => [g.date, g.items.map((i) => i.id), g.expenseTotal])).toEqual([
+      ['2026-10-12', ['now'], 200],
+      ['2026-10-11', ['backdated', 'earlier'], 400],
+    ])
+  })
+})
+
 describe('dayLabel', () => {
+  it('adds the year only when it differs from this year', () => {
+    expect(dayLabel('2025-10-10', '2026-10-12')).toBe('Fri, 10 Oct 2025')
+    expect(dayLabel('2026-03-05', '2026-10-12')).toBe('Thu, 5 Mar')
+  })
+
   it('uses relative words for today and yesterday', () => {
     expect(dayLabel('2026-10-12', '2026-10-12')).toBe('Today')
     expect(dayLabel('2026-10-11', '2026-10-12')).toBe('Yesterday')
