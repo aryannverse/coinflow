@@ -22,7 +22,7 @@ const SECTIONS = [
   ['income', 'Income', 'No recurring income yet. Add a salary or allowance and it shows up here.'],
 ] as const
 const CADENCE = { weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' } as const
-const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/60'
+const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring'
 const ACTION = `inline-flex min-h-12 min-w-12 items-center justify-center gap-1.5 rounded-chip px-3 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-[0.97] aria-disabled:opacity-50 ${RING}`
 
 const useIsDesktop = () => useMediaQuery('(min-width: 1024px)') ?? false
@@ -32,13 +32,14 @@ function dueLabel(r: RecurringDTO, thisYear: string) {
   return formatISODate(r.nextDueOn, { day: 'numeric', month: 'short', ...(r.nextDueOn.slice(0, 4) === thisYear ? {} : { year: 'numeric' }) })
 }
 
-function RecurringRow({ r, thisYear, busy, onEdit, onToggle, onDelete }: {
-  r: RecurringDTO; thisYear: string; busy: boolean
+function RecurringRow({ r, thisYear, busy, deleting, onEdit, onToggle, onDelete }: {
+  r: RecurringDTO; thisYear: string; busy: boolean; deleting: boolean
   onEdit: (r: RecurringDTO) => void; onToggle: (r: RecurringDTO) => void; onDelete: (r: RecurringDTO) => void
 }) {
   return (
     <li data-row-id={r.id} className="flex flex-col gap-1 border-b py-3 last:border-0 sm:flex-row sm:items-center sm:gap-2">
-      <div className={`flex min-w-0 flex-1 items-center justify-between gap-3 ${r.active ? '' : 'opacity-60'}`}>
+      {/* No dimming for paused rows: the "Paused" badge and copy carry the state, and opacity broke text contrast. */}
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <span className="flex flex-wrap items-center gap-2 font-medium">
             <span className="break-words">{r.name}</span>
@@ -61,7 +62,10 @@ function RecurringRow({ r, thisYear, busy, onEdit, onToggle, onDelete }: {
         >
           {r.active ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />} {r.active ? 'Pause' : 'Resume'}
         </button>
-        <button type="button" aria-label={`Delete ${r.name}`} onClick={() => onDelete(r)} className={ACTION}>
+        <button
+          type="button" aria-label={`Delete ${r.name}`} aria-disabled={deleting || undefined}
+          onClick={() => { if (!deleting) onDelete(r) }} className={ACTION}
+        >
           <Trash2 className="size-4" aria-hidden /> Delete
         </button>
       </div>
@@ -196,8 +200,9 @@ export function RecurringView({ initial, today: todayProp }: { initial?: Recurri
                       <RecurringRow
                         key={r.id} r={r} thisYear={thisYear}
                         busy={update.isPending && update.variables?.id === r.id}
+                        deleting={del.isPending && del.variables?.id === r.id}
                         onEdit={(x) => openDialog({ kind: 'edit', item: x })}
-                        onToggle={(x) => update.mutate({ id: x.id, name: x.name, patch: { active: !x.active } })}
+                        onToggle={(x) => update.mutate({ id: x.id, name: x.name, label: `${x.active ? 'Paused' : 'Resumed'} ${x.name}`, patch: { active: !x.active } })}
                         onDelete={onDelete}
                       />
                     ))}

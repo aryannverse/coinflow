@@ -172,8 +172,9 @@ export const useCreateRecurring = () =>
   useLedgerMutation((v: RecurringCreate) => api<Mutation<RecurringDTO>>('/recurring', { method: 'POST', json: v }), (v) => `Scheduled ${v.name}`, [qk.recurring])
 export const useUpdateRecurring = () =>
   useLedgerMutation(
-    ({ id, patch }: { id: string; name: string; patch: RecurringPatch }) => api<Mutation<RecurringDTO>>(`/recurring/${id}`, { method: 'PATCH', json: patch }),
-    (v) => `Updated ${v.name}`, [qk.recurring],
+    // `label` names the change in the undo toast ("Paused Rent"); a plain edit reads "Updated Rent".
+    ({ id, patch }: { id: string; name: string; label?: string; patch: RecurringPatch }) => api<Mutation<RecurringDTO>>(`/recurring/${id}`, { method: 'PATCH', json: patch }),
+    (v) => v.label ?? `Updated ${v.name}`, [qk.recurring],
   )
 export const useDeleteRecurring = () =>
   useLedgerMutation((v: { id: string; name: string }) => api<Mutation>(`/recurring/${v.id}`, { method: 'DELETE' }), (v) => `Removed ${v.name}`, [qk.recurring])
@@ -194,7 +195,8 @@ export const useUpdateMe = ({ inlineFieldErrors = false }: { inlineFieldErrors?:
     mutationFn: (patch: MePatch) => api<{ data: MeDTO }>('/me', { method: 'PATCH', json: patch }).then((r) => r.data),
     onSuccess: (me) => {
       qc.setQueryData(qk.me, me)
-      void qc.invalidateQueries({ queryKey: qk.sts })
+      // Payday moves the pay cycle, so budgets and insights periods change along with Safe-to-Spend.
+      for (const key of [qk.sts, qk.budgets, ['insights']] as QueryKey[]) void qc.invalidateQueries({ queryKey: key })
     },
     onError: (err) => {
       if (isSignedOut(err)) return
