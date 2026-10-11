@@ -6,7 +6,7 @@ import { SplitHeading } from '@/components/fx/split-heading'
 import { Safari } from '@/components/ui/safari'
 
 // Keep in sync with the screenshot: update after running `pnpm shot:landing` against the real demo user.
-const SHOT_ALT = 'Coinflow Home screen: Safe to spend ₹18,450, three upcoming bills and recent spends.'
+const SHOT_ALT = 'Coinflow Home screen: Safe to spend ₹36,721.71, two upcoming bills, today’s spending, top category Food & Dining and recent spends.'
 
 /** `cta` is a server-rendered slot (Clerk `Show` picks Start free / Open Coinflow) so it is in the first HTML. */
 export function Hero({ cta }: { cta: React.ReactNode }) {
