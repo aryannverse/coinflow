@@ -1,7 +1,7 @@
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { openQuickAdd, signInFresh, signInOnboarded } from './helpers'
+import { openQuickAdd, seedSampleLedger, signInFresh, signInOnboarded } from './helpers'
 
 async function seriousViolations(page: Page, exclude: string[] = []) {
   const axe = new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
@@ -41,6 +41,26 @@ for (const path of ['/home', '/activity', '/insights', '/recurring', '/profile']
     expect(await seriousViolations(page)).toEqual([])
   })
 }
+
+// The data states, not just the empty ones: chart tables on /insights and a paused bill on /recurring.
+test('no serious axe violations on /insights with spending to chart', async ({ page }) => {
+  await signInOnboarded(page)
+  await seedSampleLedger()
+  await page.goto('/insights')
+  await expect(page.getByRole('table', { name: /Spending by category/ })).toBeAttached()
+  await expect(page.getByRole('table', { name: /Daily spending/ })).toBeAttached()
+  await page.waitForLoadState('networkidle')
+  expect(await seriousViolations(page)).toEqual([])
+})
+
+test('no serious axe violations on /recurring with a paused bill', async ({ page }) => {
+  await signInOnboarded(page)
+  await seedSampleLedger()
+  await page.goto('/recurring')
+  await expect(page.getByRole('listitem').filter({ hasText: 'Gym membership' }).getByText('Paused', { exact: true })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(await seriousViolations(page)).toEqual([])
+})
 
 test('no serious axe violations on quick add or with the undo toast showing', async ({ page, isMobile }) => {
   await signInOnboarded(page)

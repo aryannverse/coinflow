@@ -19,4 +19,6 @@ test('a due bill appears as a draft and can be confirmed', async ({ page }) => {
   await drafts.getByRole('button', { name: 'Confirm' }).click()
   await expect(page.getByRole('status').getByText('Confirmed Netflix')).toBeVisible()
   await expect(drafts).toHaveCount(0)
+  // The last draft is gone, so focus lands on the Recent heading instead of falling to <body>.
+  await expect(page.locator('#recent-title')).toBeFocused()
 })

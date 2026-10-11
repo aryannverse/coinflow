@@ -63,6 +63,38 @@ export async function signInOnboarded(page: Page, balanceRupees = 50_000) {
   await page.goto('/home')
 }
 
+/**
+ * Gives the (already onboarded) E2E user a non-empty ledger: a few confirmed expenses in the current cycle, an
+ * active bill and a PAUSED one. Pages then render their data states (chart tables, paused rows), not the empty
+ * ones, under axe and the reflow checks. Scoped to the E2E user only.
+ */
+export async function seedSampleLedger() {
+  await withSql(async (sql) => {
+    const [u] = await sql`select id from users where email = ${e2eEmail()}`
+    const cats = await sql`select id, name from categories where user_id is null and kind = 'expense'`
+    const cat = (name: string) => {
+      const c = cats.find((r) => r.name === name)
+      if (!c) throw new Error(`Built-in category ${name} is missing`)
+      return c.id as string
+    }
+    const spends: [string, string, number][] = [
+      ['Food & Dining', 'Swiggy biryani', 38_900], ['Transport', 'Metro recharge', 50_000],
+      ['Groceries', 'Blinkit', 86_500], ['Entertainment', 'PVR tickets', 58_000],
+    ]
+    for (const [i, [name, note, amount]] of spends.entries()) {
+      // Seconds apart and just before now, so every row sits in the current pay cycle on any calendar day.
+      await sql`insert into transactions (user_id, type, amount, personal_share, category_id, note, method, occurred_at)
+                values (${u.id}, 'expense', ${amount}, ${amount}, ${cat(name)}, ${note}, 'upi', now() - ${`${(i + 1) * 10} seconds`}::interval)`
+    }
+    for (const [name, category, amount, active] of [['Netflix', 'Subscriptions', 64_900, true], ['Gym membership', 'Health', 150_000, false]] as const) {
+      await sql`insert into recurring_items (user_id, kind, name, amount, cadence, next_due_on, anchor_day, category_id, active)
+                values (${u.id}, 'bill', ${name}, ${amount}, 'monthly',
+                        (now() at time zone 'Asia/Kolkata')::date + 9,
+                        extract(day from (now() at time zone 'Asia/Kolkata') + interval '9 days')::smallint, ${cat(category)}, ${active})`
+    }
+  })
+}
+
 /** Opens quick add the way the viewport allows: the pill's + on touch, the TopBar Add button on desktop. */
 export async function openQuickAdd(page: Page, isMobile: boolean) {
   if (isMobile) await page.locator('[data-testid="ask-add"]').click()
