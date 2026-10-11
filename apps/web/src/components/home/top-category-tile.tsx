@@ -1,16 +1,27 @@
 'use client'
 import { Tile } from '@/components/fx/tile'
-import { useInsights } from '@/hooks/queries'
-import type { InsightsDTO } from '@/lib/api-types'
+import { useInsights, useTransactions } from '@/hooks/queries'
+import type { InsightsDTO, TransactionDTO } from '@/lib/api-types'
+import { hasEnoughExpenses, topCategory } from '@/lib/home-selectors'
 import { formatINR } from '@/lib/money'
 import { TileHeading } from './tile-heading'
 
-/** Hidden until the user has 3+ expenses (spec §4.5): a "top" of one or two items is noise. */
-export function TopCategoryTile({ from, to, enabled, initial }: { from: string; to: string; enabled: boolean; initial?: InsightsDTO }) {
-  const { data } = useInsights(from, to, initial)
-  const top = data?.byCategory[0]
-  if (!enabled || !data || !top || data.totalExpense === 0) return null
-  const share = Math.round((top.amount / data.totalExpense) * 100)
+/**
+ * Shared by the tile and the grid (which needs to know whether the tile is showing). Both read the same cache.
+ * "Enabled" comes from client data (the recent-transactions cache), so the tile appears after the third
+ * expense without a reload; it stays hidden until then because a "top" of one or two items is noise.
+ */
+export function useTopCategory(from: string, to: string, recentInitial: TransactionDTO[], insightsInitial?: InsightsDTO) {
+  const { data: recent } = useTransactions({})
+  const enabled = hasEnoughExpenses(recent?.pages.flatMap((p) => p.data) ?? recentInitial)
+  const { data } = useInsights(from, to, insightsInitial, enabled)
+  return topCategory(data, enabled)
+}
+
+export function TopCategoryTile({ from, to, recentInitial, initial }: { from: string; to: string; recentInitial: TransactionDTO[]; initial?: InsightsDTO }) {
+  const view = useTopCategory(from, to, recentInitial, initial)
+  if (!view) return null
+  const { top, share } = view
   return (
     <Tile aria-labelledby="top-title" className="h-full">
       <TileHeading id="top-title">Top category · this cycle</TileHeading>

@@ -19,7 +19,7 @@ export function SafeToSpendTile({ initial, today }: { initial: SafeToSpendDTO; t
   const view = stsDisplay(data)
   const dots = cycleDots(data.cycleStart, data.cycleEnd, today)
   const todayIndex = dots.indexOf('today')
-  const dayNumber = todayIndex >= 0 ? todayIndex + 1 : dots.filter((d) => d === 'past').length + 1
+  const dayNumber = Math.min(dots.length, todayIndex >= 0 ? todayIndex + 1 : dots.filter((d) => d === 'past').length + 1)
   return (
     <section aria-labelledby="sts-title" className="relative flex h-full flex-col overflow-hidden rounded-tile bg-lime p-6 text-[#0F1210]">
       <TileHeading id="sts-title" className="text-[#0F1210]/75">Safe to spend</TileHeading>

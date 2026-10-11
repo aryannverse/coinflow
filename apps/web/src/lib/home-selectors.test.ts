@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { todaySummary, upcomingBills } from './home-selectors'
+import { hasEnoughExpenses, todaySummary, topCategory, upcomingBills } from './home-selectors'
 
 const r = (over: object) => ({ id: 'x', kind: 'bill', name: 'Netflix', amount: 64_900, cadence: 'monthly', nextDueOn: '2026-10-20', anchorDay: 20, active: true, ...over }) as never
 
@@ -29,5 +29,32 @@ describe('todaySummary', () => {
   })
   it('empty day', () => {
     expect(todaySummary([], '2026-10-12')).toEqual({ total: 0, count: 0, last: null })
+  })
+  it('last is the newest by occurredAt whatever the input order', () => {
+    const a = { ...(t('2026-10-12T04:00:00Z', 1_000) as object), id: 'a' }
+    const b = { ...(t('2026-10-12T09:00:00Z', 2_000) as object), id: 'b' }
+    const c = { ...(t('2026-10-12T06:00:00Z', 3_000) as object), id: 'c' }
+    expect(todaySummary([a, c, b] as never, '2026-10-12').last).toMatchObject({ id: 'b' })
+    expect(todaySummary([b, a, c] as never, '2026-10-12').last).toMatchObject({ id: 'b' })
+  })
+})
+
+describe('hasEnoughExpenses', () => {
+  const e = (type: string) => ({ type }) as never
+  it('needs three expenses; income does not count', () => {
+    expect(hasEnoughExpenses([e('expense'), e('expense'), e('income')])).toBe(false)
+    expect(hasEnoughExpenses([e('expense'), e('expense'), e('expense')])).toBe(true)
+  })
+})
+
+describe('topCategory', () => {
+  const insights = { totalExpense: 200, byCategory: [{ name: 'Food', amount: 150 }, { name: 'Taxi', amount: 50 }] } as never
+  it('returns the leader and its rounded share', () => {
+    expect(topCategory(insights, true)).toMatchObject({ top: { name: 'Food' }, share: 75 })
+  })
+  it('is null when disabled, missing, empty or without spending', () => {
+    expect(topCategory(insights, false)).toBeNull()
+    expect(topCategory(undefined, true)).toBeNull()
+    expect(topCategory({ totalExpense: 0, byCategory: [] } as never, true)).toBeNull()
   })
 })

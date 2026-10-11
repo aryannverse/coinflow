@@ -50,9 +50,9 @@ export function RecentActivityTile({ initial }: { initial: TransactionDTO[] }) {
         </div>
       ) : animate ? (
         // AnimatedList reveals its children in order and stacks each new one on top, so it gets oldest-first (R21).
-        <AnimatedList delay={60} className="gap-1">
+        <AnimatedList delay={60} className="gap-1" role="list">
           {[...items].reverse().map((t) => (
-            <div key={t.id} className={ROW}><Row t={t} /></div>
+            <div key={t.id} role="listitem" className={ROW}><Row t={t} /></div>
           ))}
         </AnimatedList>
       ) : (
