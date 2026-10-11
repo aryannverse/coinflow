@@ -104,6 +104,7 @@ describe('fieldTarget', () => {
     expect(fieldTarget('name')).toBe('ob-name')
     expect(fieldTarget('monthlyIncome')).toBe('ob-income')
     expect(fieldTarget('fixedCostsEstimate')).toBe('ob-fixed')
+    expect(fieldTarget('bills')).toBe('ob-bill-submit')
     expect(fieldTarget('somethingElse')).toBeNull()
   })
 })

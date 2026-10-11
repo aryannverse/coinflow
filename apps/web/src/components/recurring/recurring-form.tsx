@@ -46,11 +46,14 @@ const trigger = (invalid: boolean) => cn('min-h-12 w-full data-[size=default]:h-
 /** "12." is a valid mid-typing state; read it as 12. Empty or unparseable gives null. */
 const toPaise = (typed: string) => parseRupeesToPaise(typed.endsWith('.') ? typed.slice(0, -1) : typed)
 
-export function RecurringForm({ initial, onDone, kindDefault = 'bill', prefill }: {
+export function RecurringForm({ initial, onDone, kindDefault = 'bill', prefill, submitId, submitDescribedBy }: {
   initial?: RecurringDTO
   onDone: () => void
   kindDefault?: Kind
   prefill?: { name: string; category: string; amount: number }
+  /** Lets a host (onboarding) move focus to, and describe, the submit button. */
+  submitId?: string
+  submitDescribedBy?: string
 }) {
   const startKind: Kind = initial?.kind ?? kindDefault
   const [kind, setKind] = useState<Kind>(startKind)
@@ -212,7 +215,7 @@ export function RecurringForm({ initial, onDone, kindDefault = 'bill', prefill }
       </div>
 
       {formError && <p role="alert" className="text-sm text-neutral-negative">{formError}</p>}
-      <Button type="submit" aria-disabled={pending || undefined} className="min-h-12 w-full rounded-chip text-base active:scale-[0.97] aria-disabled:opacity-70">
+      <Button type="submit" id={submitId} aria-describedby={submitDescribedBy} aria-disabled={pending || undefined} className="min-h-12 w-full rounded-chip text-base active:scale-[0.97] aria-disabled:opacity-70">
         {pending ? 'Saving…' : initial ? 'Save changes' : 'Add to schedule'}
       </Button>
     </form>

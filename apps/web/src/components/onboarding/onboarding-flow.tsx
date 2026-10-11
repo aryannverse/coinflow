@@ -20,6 +20,7 @@ const money = (paise: number | null) => (paise ? paiseToRupeeString(paise) : '')
 
 /** Steps whose Enter key means Continue. Bills hosts its own form; Done's Enter is the focused button. */
 const ENTER_CONTINUES = new Set([1, 2, 3, 5, 6])
+const BILLS_STEP = 4
 
 export function OnboardingFlow({ me }: { me: MeDTO }) {
   const router = useRouter()
@@ -41,6 +42,7 @@ export function OnboardingFlow({ me }: { me: MeDTO }) {
   const [saving, setSaving] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [celebrated, setCelebrated] = useState(false)
+  const [billsOpen, setBillsOpen] = useState(false)
 
   const set = (key: keyof OnboardingValues) => (value: string) => {
     setValues((prev) => ({ ...prev, [key]: value }))
@@ -60,6 +62,8 @@ export function OnboardingFlow({ me }: { me: MeDTO }) {
   async function advance() {
     if (saving || leaving) return
     setIssue(null)
+    // An open bill form has not been saved; moving on would drop it without a word.
+    if (step === BILLS_STEP && billsOpen) return showIssue({ field: 'bills', message: 'Add this bill or choose Never mind first.' })
     const planned = planStep(step, values, saved, lastCheckin)
     if (!planned.ok) return showIssue(planned.issue)
     setSaving(true)
@@ -99,6 +103,7 @@ export function OnboardingFlow({ me }: { me: MeDTO }) {
     if (saving) return
     setIssue(null)
     if (step === LAST_STEP) setCelebrated(true) // the burst happens once
+    setBillsOpen(false) // only the current step is mounted, so leaving Bills closes its form
     setStep((s) => Math.max(1, s - 1))
   }
 
@@ -136,7 +141,13 @@ export function OnboardingFlow({ me }: { me: MeDTO }) {
             <BalanceStep balance={values.balance} setBalance={set('balance')} error={errorOn('amount')} />
           </Step>
           <Step title="Bills">
-            <BillsStep />
+            <BillsStep
+              error={errorOn('bills')}
+              onOpenChange={(o) => {
+                setBillsOpen(o)
+                if (!o) setIssue(null)
+              }}
+            />
           </Step>
           <Step title="Fixed costs">
             <FixedCostsStep value={values.fixed} setValue={set('fixed')} error={errorOn('fixedCostsEstimate')} />
@@ -154,7 +165,8 @@ export function OnboardingFlow({ me }: { me: MeDTO }) {
           {formError}
         </p>
       )}
-      {!leaving && (
+      {/* On Done there is nothing left to skip: "Go to Coinflow" is the way out. */}
+      {!leaving && step !== LAST_STEP && (
         <button
           type="button"
           aria-disabled={saving || undefined}

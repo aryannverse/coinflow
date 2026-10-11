@@ -29,6 +29,8 @@ const TARGETS: Record<string, string> = {
   amount: 'ob-balance',
   fixedCostsEstimate: 'ob-fixed',
   upiId: 'ob-upi',
+  // Bills: an open, unsaved bill form blocks Continue; focus goes to that form's "Add to schedule".
+  bills: 'ob-bill-submit',
 }
 export const fieldTarget = (field: string): string | null => TARGETS[field] ?? null
 

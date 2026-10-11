@@ -9,11 +9,19 @@ import { StepHeading } from './step-heading'
 type Suggestion = (typeof BILL_SUGGESTIONS)[number]
 const CHIP = 'min-h-12 rounded-chip border bg-surface-2 px-3 text-sm transition active:scale-[0.97]'
 
-/** Optional: bills are set aside before Safe-to-Spend. Each one is saved by the form itself, so Continue has nothing extra to save. */
-export function BillsStep() {
+/**
+ * Optional: bills are set aside before Safe-to-Spend. Each one is saved by the form itself, so Continue has
+ * nothing extra to save. `onOpenChange` tells the flow when a form is open, so Continue can stop instead of
+ * silently dropping a half-entered bill; `error` is the flow's message for that case.
+ */
+export function BillsStep({ onOpenChange, error }: { onOpenChange?: (open: boolean) => void; error?: string }) {
   const { data = [] } = useRecurring()
   // null: no form open. `{}`: a blank form. `{ prefill }`: a suggestion.
-  const [open, setOpen] = useState<{ prefill?: Suggestion } | null>(null)
+  const [open, setOpenState] = useState<{ prefill?: Suggestion } | null>(null)
+  const setOpen = (next: { prefill?: Suggestion } | null) => {
+    setOpenState(next)
+    onOpenChange?.(next !== null)
+  }
   const [note, setNote] = useState('')
   const status = useRef<HTMLParagraphElement>(null)
   const remaining = BILL_SUGGESTIONS.filter((s) => !data.some((d) => d.name === s.name))
@@ -43,6 +51,8 @@ export function BillsStep() {
             key={open.prefill?.name ?? 'custom'}
             prefill={open.prefill}
             kindDefault="bill"
+            submitId="ob-bill-submit"
+            submitDescribedBy={error ? 'ob-bills-error' : undefined}
             onDone={() => {
               setNote(`Added ${open.prefill?.name ?? 'your bill'}.`)
               setOpen(null)
@@ -50,6 +60,11 @@ export function BillsStep() {
               queueMicrotask(() => status.current?.focus())
             }}
           />
+          {error && (
+            <p id="ob-bills-error" role="alert" className="mt-3 text-sm text-neutral-negative">
+              {error}
+            </p>
+          )}
           <Button type="button" variant="ghost" className="mt-2 min-h-12 w-full rounded-chip active:scale-[0.97]" onClick={() => setOpen(null)}>
             Never mind
           </Button>
