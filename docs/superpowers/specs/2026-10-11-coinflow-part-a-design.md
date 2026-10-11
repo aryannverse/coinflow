@@ -133,7 +133,7 @@ Signed-in users hitting `/` see a "Go to dashboard" CTA rather than an automatic
 ### 4.2 Landing page (`/`)
 
 Sections, top to bottom:
-1. **Hero:** React Bits **Dither** background in lime-on-charcoal; React Bits **Split Text** headline ("Know what's safe to spend."); Magic UI **Shimmer Button** CTA; Magic UI **Safari** frame showing the real dashboard UI rendered live, not a static image.
+1. **Hero:** React Bits **Dither** background in lime-on-charcoal; React Bits **Split Text** headline ("Know what's safe to spend."); Magic UI **Shimmer Button** CTA; Magic UI **Safari** frame showing a real screenshot of the dashboard, captured from the running app with demo data by `pnpm shot:landing`.
 2. **"Money flow" pinned section (GSAP ScrollTrigger):** Magic UI **Animated Beam** lines connecting Income → Bills → Safe-to-Spend tiles as the user scrolls; numbers animate with Magic UI **Number Ticker**.
 3. **Feature bento:** React Bits **Magic Bento** / **Spotlight Card** tiles for Safe-to-Spend, Quick add, Undo, Insights, plus "Coming next: Groups & AI" teasers.
 4. **How it feels:** Magic UI **Marquee** of example quick-add phrases; React Bits **Scroll Reveal** for the principles copy ("No guilt. No red alerts.").
@@ -180,7 +180,7 @@ Opened via **+ Add**, the mobile **+**, the keyboard shortcut **N**, or the pale
 2. **Type toggle:** Expense / Income.
 3. **Category chips:** recent first, then all; 48 px targets.
 4. **Optional:** note, date/time (default now), method (UPI / Cash / Card / Other; remembered last-used).
-5. **Save:** the row animates into Activity (View Transitions API where supported), React Bits **Click Spark** on the button, and an **undo toast** appears.
+5. **Save:** React Bits **Click Spark** on the button, the new row slides into Recent/Activity via Magic UI **Animated List**, and an **undo toast** appears.
 
 Validation: amount > 0 and ≤ ₹1,00,00,000; the date is not more than 1 day in the future.
 
@@ -273,14 +273,15 @@ transactions
 recurring_items
   id uuid PK, user_id FK, kind text (bill|income), name text
   amount bigint, cadence text (weekly|monthly|yearly)
-  next_due_on date, category_id uuid FK, active boolean default true
+  next_due_on date, anchor_day smallint (day-of-month the schedule snaps back to, so 31 → 28 → 31 never drifts)
+  category_id uuid FK, active boolean default true
 
 budgets
   id uuid PK, user_id FK, category_id FK, monthly_limit bigint
   unique (user_id, category_id)
 
 audit_log
-  id uuid PK, user_id FK, entity text, entity_id uuid
+  id uuid PK, seq bigserial (strict ordering for latest-only undo), user_id FK, entity text, entity_id uuid
   action text (create|update|delete|restore|confirm)
   before jsonb null, after jsonb null, actor text (user|agent)
   created_at timestamptz
