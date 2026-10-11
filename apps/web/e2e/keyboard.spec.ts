@@ -27,22 +27,24 @@ test('onboarding can be finished with Tab and Enter only', async ({ page }) => {
     await page.keyboard.press('ControlOrMeta+a') // replace any prefilled value
     await page.keyboard.type(value)
   }
-  const next = async (name: 'Continue' | 'Go to Coinflow') => {
+  // Waits for the new step before the next keystroke: Enter during the step transition is swallowed by the busy stepper.
+  const next = async (name: 'Continue' | 'Go to Coinflow', arrivesAt?: number) => {
     await tabTo(page, page.getByRole('button', { name }))
     await page.keyboard.press('Enter')
+    if (arrivesAt) await expect(page.getByText(new RegExp(`Step ${arrivesAt} of 7`, 'i'))).toBeVisible()
   }
 
   await type('Name', 'Asha')
-  await next('Continue')
+  await next('Continue', 2)
   await expect(page.getByLabel('Payday (day of month)')).toBeVisible()
   await type('Payday (day of month)', '1')
-  await next('Continue')
+  await next('Continue', 3)
   await expect(page.getByLabel('Balance in rupees')).toBeVisible()
   await type('Balance in rupees', '50000')
-  await next('Continue')
-  await next('Continue') // bills
-  await next('Continue') // basics
-  await next('Continue') // upi
+  await next('Continue', 4)
+  await next('Continue', 5) // bills
+  await next('Continue', 6) // basics
+  await next('Continue', 7) // upi
   await expect(page.getByText('You can safely spend')).toBeVisible()
   await next('Go to Coinflow')
   await page.waitForURL('**/home')

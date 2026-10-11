@@ -27,6 +27,9 @@ export function resetE2EUser() {
 }
 
 export async function signIn(page: Page) {
+  // The theme spec saves its choice to the profile, and a fresh browser seeds its theme from the profile on first load.
+  // Reset BEFORE the first app page loads so every spec starts from the defaults (no row yet = nothing to reset).
+  await withSql((sql) => sql`update users set theme = 'dark', reduced_motion = 'system' where email = ${e2eEmail()}`)
   await setupClerkTestingToken({ page })
   await page.goto('/')
   await clerk.signIn({ page, emailAddress: e2eEmail() })

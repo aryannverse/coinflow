@@ -14,7 +14,8 @@ test('a due bill appears as a draft and can be confirmed', async ({ page }) => {
   })
   await page.goto('/home')
   const drafts = page.getByRole('region', { name: /Waiting for you/ })
-  await expect(drafts.getByText('Netflix')).toBeVisible()
+  // Several nodes carry the name (visible text plus sr-only button labels): assert on the row, not the text.
+  await expect(drafts.getByRole('listitem').filter({ hasText: 'Netflix' })).toBeVisible()
   await drafts.getByRole('button', { name: 'Confirm' }).click()
   await expect(page.getByRole('status').getByText('Confirmed Netflix')).toBeVisible()
   await expect(drafts).toHaveCount(0)
