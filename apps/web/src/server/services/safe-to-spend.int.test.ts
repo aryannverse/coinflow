@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
 import { getDb } from '@/server/db/client'
-import { users } from '@/server/db/schema'
+import { transactions, users } from '@/server/db/schema'
 import { createCheckin } from './checkins'
 import { createRecurring } from './recurring'
 import { getSafeToSpend } from './safe-to-spend'
@@ -64,5 +64,40 @@ describe('getSafeToSpend', () => {
     const r = await getSafeToSpend('user_a', NOW)
     expect(r.breakdown.balance).toBe(5_000_000 - 50_000)
     expect(r.breakdown.committedOut).toBe(0)
+  })
+
+  describe('check-in boundary (I-3)', () => {
+    const CHECKIN = new Date('2026-10-11T04:45:30Z') // 10:15:30 IST
+    const LATER = new Date('2026-10-11T12:00:00Z') // 17:30 IST
+    const expense = (amount: number, occurredAt: Date, status: 'confirmed' | 'draft' = 'confirmed') =>
+      createTransaction('user_a', { type: 'expense', amount, categoryId: foodId, method: 'upi', occurredAt, note: null }, { status })
+
+    it('P5: counts an expense logged after the check-in but stamped with the check-in minute', async () => {
+      await createCheckin('user_a', 5_000_000, CHECKIN)
+      await expense(12_000, new Date('2026-10-11T04:45:00Z')) // 10:15:00 IST, minute-rounded by the client
+      expect((await getSafeToSpend('user_a', LATER)).breakdown.balance).toBe(5_000_000 - 12_000)
+    })
+
+    it('ignores a back-dated expense from the previous IST day even when logged after the check-in', async () => {
+      await createCheckin('user_a', 5_000_000, CHECKIN)
+      await expense(30_000, new Date('2026-10-10T14:00:00Z')) // 19:30 IST Oct 10
+      expect((await getSafeToSpend('user_a', LATER)).breakdown.balance).toBe(5_000_000)
+    })
+
+    it('ignores an expense in the check-in minute that was logged before the check-in', async () => {
+      const early = await expense(40_000, new Date('2026-10-11T04:45:10Z'))
+      await getDb().update(transactions).set({ createdAt: new Date('2026-10-11T04:45:10Z') }).where(eq(transactions.id, early.data.id))
+      await createCheckin('user_a', 5_000_000, CHECKIN)
+      expect((await getSafeToSpend('user_a', LATER)).breakdown.balance).toBe(5_000_000)
+    })
+
+    it('counts a bill draft due today (12:00 IST) after a 15:00 IST check-in', async () => {
+      await createCheckin('user_a', 5_000_000, new Date('2026-10-11T09:30:00Z')) // 15:00 IST
+      await expense(64_900, new Date('2026-10-11T06:30:00Z'), 'draft') // 12:00 IST, the materialized due-day stamp
+      await expense(10_000, new Date('2026-10-10T06:30:00Z'), 'draft') // due yesterday: before the check-in day
+      const r = await getSafeToSpend('user_a', LATER)
+      expect(r.breakdown.committedOut).toBe(64_900)
+      expect(r.breakdown.balance).toBe(5_000_000)
+    })
   })
 })

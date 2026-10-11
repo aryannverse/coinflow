@@ -1,14 +1,16 @@
-import { count, eq } from 'drizzle-orm'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { and, count, eq, isNull } from 'drizzle-orm'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
-import { addDays, addMonthsAnchored, clampDayInMonth, dayOfMonth, toISTDate } from '@/lib/dates'
+import { addDays, addMonthsAnchored, clampDayInMonth, dayOfMonth, istNoon, istStartOfDay, toISTDate } from '@/lib/dates'
 import { nextOccurrence } from '@/lib/recurrence'
 import { transactionListQuerySchema } from '@/lib/schemas/transactions'
 import { getDb } from '@/server/db/client'
-import { auditLog, recurringItems } from '@/server/db/schema'
+import { auditLog, recurringItems, transactions } from '@/server/db/schema'
 import { undo } from './audit'
+import { createCheckin } from './checkins'
 import { createRecurring, deleteRecurring, listRecurring, materializeDueRecurring, updateRecurring } from './recurring'
-import { listTransactions } from './transactions'
+import { getSafeToSpend } from './safe-to-spend'
+import { confirmDraft, createTransaction, listTransactions } from './transactions'
 
 const drafts = (userId: string) => listTransactions(userId, transactionListQuerySchema.parse({ status: 'draft' }))
 const auditCount = async () => (await getDb().select({ n: count() }).from(auditLog))[0].n
@@ -185,7 +187,120 @@ describe('recurring service', () => {
       expect(data.nextDueOn >= t).toBe(true)
       const [y, m] = data.nextDueOn.split('-').map(Number)
       expect(data.nextDueOn).toBe(clampDayInMonth(y, m, 12))
-      expect(data.anchorDay).toBe(dayOfMonth(data.nextDueOn))
+      expect(data.anchorDay).toBe(12) // the schedule day before the change, not the fast-forward result
+    })
+
+    describe('with a clamped fast-forward (M-3)', () => {
+      afterEach(() => { vi.useRealTimers() })
+
+      it('stores the user’s schedule day, not the clamped day the fast-forward landed on', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-11-15T06:30:00Z')) // 12:00 IST, Nov 15
+        const { data } = await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: '2026-10-31' }))
+        await updateRecurring('user_a', data.id, { active: false })
+        const { data: resumed } = await updateRecurring('user_a', data.id, { active: true, cadence: 'monthly' })
+        expect(resumed.nextDueOn).toBe('2026-11-30') // first monthly occurrence on/after Nov 15, clamped from 31
+        expect(resumed.anchorDay).toBe(31)
+        expect(nextOccurrence(resumed.nextDueOn, 'monthly', resumed.anchorDay)).toBe('2026-12-31')
+      })
+    })
+  })
+
+  describe('unchanged fields in a full-body save (I-2)', () => {
+    const body = (item: Awaited<ReturnType<typeof listRecurring>>[number]) => ({
+      kind: item.kind, name: item.name, amount: item.amount, cadence: item.cadence,
+      nextDueOn: item.nextDueOn, categoryId: item.categoryId, active: item.active,
+    })
+
+    it('P3: an amount-only edit that re-sends a clamped nextDueOn keeps anchor 31', async () => {
+      await createRecurring('user_a', rent({ nextDueOn: '2026-10-31' }))
+      await materializeDueRecurring('user_a', '2026-10-31') // draft for Oct 31; nextDueOn -> Nov 30 (clamped)
+      const [item] = await listRecurring('user_a')
+      expect(item).toMatchObject({ nextDueOn: '2026-11-30', anchorDay: 31 })
+      const { data, auditId } = await updateRecurring('user_a', item.id, { ...body(item), amount: 1_600_000 })
+      expect(auditId).toEqual(expect.any(String))
+      expect(data).toMatchObject({ amount: 1_600_000, nextDueOn: '2026-11-30', anchorDay: 31 })
+      expect(nextOccurrence(data.nextDueOn, 'monthly', data.anchorDay)).toBe('2026-12-31')
+    })
+
+    it('a full-body save with no changes is a no-op with auditId null', async () => {
+      await createRecurring('user_a', rent())
+      const [item] = await listRecurring('user_a')
+      const before = await auditCount()
+      const res = await updateRecurring('user_a', item.id, body(item))
+      expect(res.auditId).toBeNull()
+      expect(res.data).toEqual(item)
+      expect(await auditCount()).toBe(before)
+    })
+  })
+
+  describe('undo cleans materialized drafts (I-1)', () => {
+    const t = () => toISTDate(new Date())
+    const liveDrafts = (itemId?: string) => getDb().select().from(transactions).where(and(
+      eq(transactions.userId, 'user_a'), eq(transactions.status, 'draft'), isNull(transactions.deletedAt),
+      itemId ? eq(transactions.recurringItemId, itemId) : undefined,
+    ))
+
+    it('P1: undo resume, resume again, read again leaves one draft for today', async () => {
+      const today = t()
+      const { data } = await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: addDays(today, -14) }))
+      await updateRecurring('user_a', data.id, { active: false })
+      const resume = await updateRecurring('user_a', data.id, { active: true })
+      expect(resume.data.nextDueOn).toBe(today)
+      await getSafeToSpend('user_a')
+      await undo('user_a', resume.auditId!)
+      await updateRecurring('user_a', data.id, { active: true })
+      await getSafeToSpend('user_a')
+      const forToday = (await drafts('user_a')).data.filter((d) => toISTDate(d.occurredAt) === today)
+      expect(forToday).toHaveLength(1)
+    })
+
+    it('P2: undoing a create removes the item and soft-deletes its drafts, so R no longer counts them', async () => {
+      const today = t()
+      await createCheckin('user_a', 50_000_000, istStartOfDay(addDays(today, -60)))
+      const { data, auditId } = await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: addDays(today, -28) }))
+      const before = await getSafeToSpend('user_a')
+      expect(await liveDrafts(data.id)).toHaveLength(5)
+      expect(before.breakdown.committedOut).toBeGreaterThanOrEqual(5 * 1_500_000)
+      await undo('user_a', auditId)
+      expect(await listRecurring('user_a')).toHaveLength(0)
+      expect(await liveDrafts()).toHaveLength(0)
+      expect((await getSafeToSpend('user_a')).breakdown.committedOut).toBe(0)
+    })
+
+    it('never touches confirmed rows or drafts that existed before the undone change', async () => {
+      const today = t()
+      const { data } = await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: addDays(today, -7) }))
+      await materializeDueRecurring('user_a', today) // drafts for today-7 and today
+      const [older] = await liveDrafts(data.id)
+      await confirmDraft('user_a', older.id)
+      const rename = await updateRecurring('user_a', data.id, { name: 'Rent (flat 4B)' })
+      await undo('user_a', rename.auditId!)
+      expect(await liveDrafts(data.id)).toHaveLength(1)
+      const [confirmed] = await getDb().select().from(transactions).where(eq(transactions.id, older.id))
+      expect(confirmed).toMatchObject({ status: 'confirmed', deletedAt: null })
+    })
+  })
+
+  describe('duplicate-draft backstop', () => {
+    it('the database rejects a second live draft for the same item and day', async () => {
+      const { data } = await createRecurring('user_a', rent({ nextDueOn: '2026-10-05' }))
+      const draft = { type: 'expense' as const, amount: 1_500_000, categoryId: rentId, method: 'upi' as const, occurredAt: istNoon('2026-10-05') }
+      const opts = { status: 'draft' as const, source: 'recurring' as const, recurringItemId: data.id }
+      await createTransaction('user_a', draft, opts)
+      await expect(createTransaction('user_a', draft, opts)).rejects.toMatchObject({
+        cause: { constraint_name: 'transactions_recurring_draft_unique' },
+      })
+    })
+
+    it('materialize skips an occurrence that already has a live draft', async () => {
+      const { data } = await createRecurring('user_a', rent({ nextDueOn: '2026-09-30' }))
+      await createTransaction('user_a',
+        { type: 'expense', amount: 1_500_000, categoryId: rentId, method: 'upi', occurredAt: istNoon('2026-09-30') },
+        { status: 'draft', source: 'recurring', recurringItemId: data.id })
+      expect(await materializeDueRecurring('user_a', '2026-10-11')).toBe(0)
+      expect((await drafts('user_a')).data).toHaveLength(1)
+      expect((await listRecurring('user_a'))[0].nextDueOn).toBe('2026-10-30') // anchor 30
     })
   })
 

@@ -25,4 +25,19 @@ describe('getInsights', () => {
     const foodRow = r.byCategory.find((c) => c.name === 'Food & Dining')!
     expect(foodRow).toMatchObject({ amount: 30_000, previous: 7_000 })
   })
+
+  it('keeps a category that had spend only in the previous window, with amount 0', async () => {
+    const food = await builtinCategory('Food & Dining')
+    const taxi = await builtinCategory('Transport')
+    const add = (amount: number, iso: string, categoryId: string) =>
+      createTransaction('user_a', { type: 'expense', amount, categoryId, method: 'upi', occurredAt: new Date(iso), note: null })
+    await add(20_000, '2026-10-12T06:00:00Z', food.id)
+    await add(9_000, '2026-10-10T06:00:00Z', taxi.id) // previous window only
+
+    const r = await getInsights('user_a', '2026-10-12', '2026-10-13')
+    expect(r.byCategory).toEqual([
+      expect.objectContaining({ name: 'Food & Dining', amount: 20_000, previous: 0 }),
+      expect.objectContaining({ name: 'Transport', amount: 0, previous: 9_000 }),
+    ])
+  })
 })

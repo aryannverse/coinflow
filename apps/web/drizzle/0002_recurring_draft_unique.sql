@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "transactions_recurring_draft_unique" ON "transactions" USING btree ("recurring_item_id","occurred_at") WHERE "transactions"."status" = 'draft' and "transactions"."deleted_at" is null and "transactions"."recurring_item_id" is not null;

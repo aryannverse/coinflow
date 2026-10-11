@@ -1,6 +1,6 @@
 import * as nextEnv from '@next/env'
 
-nextEnv.loadEnvConfig(process.cwd())
+nextEnv.loadEnvConfig(process.cwd(), true) // dev mode: never load .env.production*
 
 async function main() {
   const email = process.argv[2]

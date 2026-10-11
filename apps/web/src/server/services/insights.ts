@@ -50,14 +50,18 @@ export async function getInsights(userId: string, from: ISODate, to: ISODate): P
     byCategory(userId, prevFrom, prevTo),
   ])
 
-  const prevMap = new Map(previous.map((p) => [p.categoryId, p.amount]))
+  // Union of both windows: a category that had spend only last time still shows, with amount 0.
+  const rows = new Map(current.map((c) => [c.categoryId, { ...c, previous: 0 }]))
+  for (const p of previous) {
+    const row = rows.get(p.categoryId)
+    if (row) row.previous = p.amount
+    else rows.set(p.categoryId, { ...p, amount: 0, previous: p.amount })
+  }
   return {
     from, to,
     totalExpense: totals[0].expense,
     totalIncome: totals[0].income,
     byDay: days,
-    byCategory: current
-      .map((c) => ({ ...c, previous: prevMap.get(c.categoryId) ?? 0 }))
-      .sort((a, b) => b.amount - a.amount),
+    byCategory: [...rows.values()].sort((a, b) => b.amount - a.amount || b.previous - a.previous || a.name.localeCompare(b.name)),
   }
 }

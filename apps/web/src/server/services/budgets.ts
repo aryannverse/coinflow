@@ -4,7 +4,7 @@ import { payCycle } from '@/lib/cycle'
 import { addDays, istStartOfDay, toISTDate } from '@/lib/dates'
 import { getDb } from '@/server/db/client'
 import { budgets, categories, transactions, type Budget } from '@/server/db/schema'
-import { notFound } from '@/server/errors'
+import { conflict, notFound } from '@/server/errors'
 import { recordAudit } from './audit'
 import { requireUsableCategory } from './categories'
 import { getUser } from './users'
@@ -33,19 +33,25 @@ export async function listBudgets(userId: string, now: Date = new Date()): Promi
     ))
     .where(eq(budgets.userId, userId))
     .groupBy(budgets.id, categories.id)
-    .orderBy(asc(categories.sort))
+    .orderBy(asc(categories.sort), asc(categories.name))
 }
 
 export async function upsertBudget(userId: string, categoryId: string, monthlyLimit: number) {
   return getDb().transaction(async (tx) => {
     await requireUsableCategory(userId, categoryId, 'expense', tx)
-    const [before] = await tx.select().from(budgets).where(and(eq(budgets.userId, userId), eq(budgets.categoryId, categoryId)))
-    const [after] = await tx.insert(budgets).values({ userId, categoryId, monthlyLimit })
-      .onConflictDoUpdate({ target: [budgets.userId, budgets.categoryId], set: { monthlyLimit, updatedAt: new Date() } })
+    // Insert-first, so concurrent first saves agree on who created the row; the rest lock it and update.
+    const [created] = await tx.insert(budgets).values({ userId, categoryId, monthlyLimit })
+      .onConflictDoNothing({ target: [budgets.userId, budgets.categoryId] })
       .returning()
-    const auditId = await recordAudit(tx, {
-      userId, entity: 'budget', entityId: after.id, action: before ? 'update' : 'create', before: before ?? null, after,
-    })
+    if (created) {
+      const auditId = await recordAudit(tx, { userId, entity: 'budget', entityId: created.id, action: 'create', before: null, after: created })
+      return { data: created as Budget, auditId }
+    }
+    const own = and(eq(budgets.userId, userId), eq(budgets.categoryId, categoryId))
+    const [before] = await tx.select().from(budgets).where(own).for('update')
+    if (!before) throw conflict('budget_changed', 'That budget just changed — please try again.') // deleted mid-save
+    const [after] = await tx.update(budgets).set({ monthlyLimit, updatedAt: new Date() }).where(own).returning()
+    const auditId = await recordAudit(tx, { userId, entity: 'budget', entityId: after.id, action: 'update', before, after })
     return { data: after as Budget, auditId }
   })
 }

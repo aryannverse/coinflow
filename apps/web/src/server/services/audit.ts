@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull } from 'drizzle-orm'
 import { getDb, type Tx } from '@/server/db/client'
 import { pgErrorCode } from '@/server/db/errors'
 import { auditLog, balanceCheckins, budgets, recurringItems, transactions } from '@/server/db/schema'
@@ -83,6 +83,16 @@ export async function undo(
     const [current] = await tx.select().from(table).where(ownRow)
     const before = entry.before as Record<string, unknown> | null
     const blocked = () => conflict('undo_conflict', 'Something newer is in the way, so this can’t be undone.')
+
+    if (entry.entity === 'recurring_item') {
+      // Materialize writes no audit, so drafts made since this change would survive the restore: as orphans
+      // (create undone) or as duplicates once nextDueOn is rewound. Runs before any hard delete, whose FK
+      // `set null` would sever the link. Confirmed rows are the user's record and are never touched.
+      await tx.update(transactions).set({ deletedAt: now }).where(and(
+        eq(transactions.recurringItemId, entry.entityId), eq(transactions.userId, userId),
+        eq(transactions.status, 'draft'), isNull(transactions.deletedAt), gte(transactions.createdAt, entry.createdAt),
+      ))
+    }
 
     try {
       if (before === null) {

@@ -1,6 +1,6 @@
 import 'server-only'
-import { and, eq, gt, isNull, sql } from 'drizzle-orm'
-import { toISTDate } from '@/lib/dates'
+import { and, eq, gt, gte, isNull, or, sql } from 'drizzle-orm'
+import { istStartOfDay, toISTDate } from '@/lib/dates'
 import { computeSafeToSpend, type SafeToSpendResult } from '@/lib/safe-to-spend'
 import { getDb } from '@/server/db/client'
 import { transactions } from '@/server/db/schema'
@@ -24,21 +24,35 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
   if (!user) throw notFound('account')
   const [checkin, recurring] = await Promise.all([getLatestCheckin(userId), listRecurring(userId)])
 
-  const after = checkin
-    ? (type: 'expense' | 'income', status: 'confirmed' | 'draft') =>
-        and(
+  /**
+   * What the check-in balance does not yet reflect (spec §4.11).
+   * Confirmed rows: stamped after the check-in, or logged after it with a time the client rounded down to the
+   * minute (or a slightly slow clock). A back-dated row from before that minute is already in the balance.
+   * Drafts: due on or after the check-in's IST day, so a bill due today still counts after a later check-in.
+   */
+  const since = checkin
+    ? (type: 'expense' | 'income', status: 'confirmed' | 'draft') => {
+        const { takenAt } = checkin
+        const takenMinute = new Date(Math.floor(takenAt.getTime() / 60_000) * 60_000) // date_trunc('minute'); IST is minute-aligned
+        const boundary = status === 'draft'
+          ? gte(transactions.occurredAt, istStartOfDay(toISTDate(takenAt)))
+          : or(
+              gt(transactions.occurredAt, takenAt),
+              and(gt(transactions.createdAt, takenAt), gte(transactions.occurredAt, takenMinute)),
+            )
+        return and(
           eq(transactions.userId, userId), isNull(transactions.deletedAt),
-          eq(transactions.type, type), eq(transactions.status, status),
-          gt(transactions.occurredAt, checkin.takenAt),
+          eq(transactions.type, type), eq(transactions.status, status), boundary,
         )
+      }
     : null
 
-  const [income, expenseShare, billDrafts, incomeDrafts] = after
+  const [income, expenseShare, billDrafts, incomeDrafts] = since
     ? await Promise.all([
-        sumWhere(after('income', 'confirmed')),
-        sumWhere(after('expense', 'confirmed'), transactions.personalShare),
-        sumWhere(after('expense', 'draft')),
-        sumWhere(after('income', 'draft')),
+        sumWhere(since('income', 'confirmed')),
+        sumWhere(since('expense', 'confirmed'), transactions.personalShare),
+        sumWhere(since('expense', 'draft')),
+        sumWhere(since('income', 'draft')),
       ])
     : [0, 0, 0, 0]
 

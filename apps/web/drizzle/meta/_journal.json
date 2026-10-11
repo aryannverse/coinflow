@@ -15,6 +15,13 @@
       "when": 1791734130555,
       "tag": "0001_builtin_categories",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791738164471,
+      "tag": "0002_recurring_draft_unique",
+      "breakpoints": true
     }
   ]
 }

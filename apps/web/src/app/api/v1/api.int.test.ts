@@ -7,6 +7,7 @@ import { clerkState } from '@test/int/clerk-mock'
 
 vi.mock('@clerk/nextjs/server', async () => (await import('@test/int/clerk-mock')).clerkModule)
 
+import { toISTDate } from '@/lib/dates'
 import { createTransaction } from '@/server/services/transactions'
 
 import * as me from './me/route'
@@ -186,6 +187,19 @@ describe('/api/v1', () => {
     const skipped = await skip.POST(new Request(url(`/transactions/${d2}/skip`), { method: 'POST' }), params({ id: d2 }))
     expect(skipped.status).toBe(200)
     expect((await skipped.json()).auditId).toEqual(expect.any(String))
+  })
+
+  it('GET /transactions?status=draft materializes due recurring items first', async () => {
+    await me.GET(new Request(url('/me')))
+    const today = toISTDate(new Date())
+    await recurring.POST(new Request(url('/recurring'), json('POST', {
+      kind: 'bill', name: 'Wi-Fi', amount: 79_900, categoryId: foodId, cadence: 'monthly', nextDueOn: today,
+    })))
+    const res = await txns.GET(new Request(url('/transactions?status=draft')))
+    expect(res.status).toBe(200)
+    const { data } = await res.json()
+    expect(data).toHaveLength(1)
+    expect(data[0]).toMatchObject({ note: 'Wi-Fi', amount: 79_900, status: 'draft', source: 'recurring' })
   })
 
   it('recurring: create 201, list, patch, delete; other users get 404', async () => {

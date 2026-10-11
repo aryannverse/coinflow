@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
-  bigint, bigserial, boolean, check, date, index, jsonb, pgTable, smallint, text, timestamp, unique, uuid,
+  bigint, bigserial, boolean, check, date, index, jsonb, pgTable, smallint, text, timestamp, unique, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core'
 
 const money = (name: string) => bigint(name, { mode: 'number' })
@@ -100,6 +100,9 @@ export const transactions = pgTable(
     check('transactions_amount_positive', sql`${t.amount} > 0`),
     check('transactions_share_range', sql`${t.personalShare} >= 0 and ${t.personalShare} <= ${t.amount}`),
     index('transactions_user_time').on(t.userId, t.occurredAt.desc()).where(sql`${t.deletedAt} is null`),
+    // Backstop: at most one live draft per recurring item per due instant (materialize also pre-checks).
+    uniqueIndex('transactions_recurring_draft_unique').on(t.recurringItemId, t.occurredAt)
+      .where(sql`${t.status} = 'draft' and ${t.deletedAt} is null and ${t.recurringItemId} is not null`),
   ],
 )
 
