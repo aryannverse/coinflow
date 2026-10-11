@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
 import { getDb } from '@/server/db/client'
-import { auditLog, budgets, transactions, type Transaction } from '@/server/db/schema'
+import { auditLog, budgets, recurringItems, transactions, type Transaction } from '@/server/db/schema'
 import { recordAudit, snapshot, undo } from './audit'
 
 async function insertTxn(userId: string): Promise<Transaction> {
@@ -102,5 +102,50 @@ describe('undo', () => {
     const restores = await getDb().select().from(auditLog)
       .where(and(eq(auditLog.userId, 'user_a'), eq(auditLog.action, 'restore')))
     expect(restores).toHaveLength(0)
+  })
+
+  it('never touches another user’s row, even if an audit entry points at it', async () => {
+    const theirs = await insertTxn('user_b')
+    const forged = await getDb().transaction((tx) =>
+      recordAudit(tx, { userId: 'user_a', entity: 'transaction', entityId: theirs.id, action: 'update', before: snapshot(theirs), after: snapshot(theirs) }))
+    // make the victim row differ from the snapshot so a stray write would be visible
+    await getDb().update(transactions).set({ note: 'untouched' }).where(eq(transactions.id, theirs.id))
+    const victim = await read(theirs.id)
+
+    await expect(undo('user_a', forged)).rejects.toMatchObject({ status: 409, code: 'undo_conflict' })
+
+    expect(await read(theirs.id)).toEqual(victim)
+    const restores = await getDb().select().from(auditLog).where(eq(auditLog.action, 'restore'))
+    expect(restores).toHaveLength(0)
+  })
+
+  it('does not delete or soft-delete another user’s row when undoing a forged create', async () => {
+    const theirs = await insertTxn('user_b')
+    const forged = await getDb().transaction((tx) =>
+      recordAudit(tx, { userId: 'user_a', entity: 'transaction', entityId: theirs.id, action: 'create', before: null, after: snapshot(theirs) }))
+
+    await expect(undo('user_a', forged)).rejects.toMatchObject({ status: 409, code: 'undo_conflict' })
+
+    expect((await read(theirs.id)).deletedAt).toBeNull()
+  })
+
+  it('restores a recurring item’s date-only and boolean fields exactly', async () => {
+    const bills = await builtinCategory('Bills & Utilities')
+    const [item] = await getDb().insert(recurringItems).values({
+      userId: 'user_a', kind: 'bill', name: 'Rent', amount: 1_500_000, cadence: 'monthly',
+      nextDueOn: '2026-11-05', anchorDay: 5, categoryId: bills.id, active: true,
+    }).returning()
+    const [changed] = await getDb().update(recurringItems).set({ nextDueOn: '2026-12-05', active: false })
+      .where(eq(recurringItems.id, item.id)).returning()
+    const auditId = await getDb().transaction((tx) =>
+      recordAudit(tx, { userId: 'user_a', entity: 'recurring_item', entityId: item.id, action: 'update', before: snapshot(item), after: snapshot(changed) }))
+
+    const result = await undo('user_a', auditId)
+
+    const [restored] = await getDb().select().from(recurringItems).where(eq(recurringItems.id, item.id))
+    expect(restored.nextDueOn).toBe('2026-11-05')
+    expect(restored.active).toBe(true)
+    const [restoreRow] = await getDb().select().from(auditLog).where(eq(auditLog.id, result.auditId))
+    expect(restoreRow).toMatchObject({ entity: 'recurring_item', entityId: item.id, action: 'restore', userId: 'user_a' })
   })
 })

@@ -79,30 +79,37 @@ export async function undo(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- one generic restore over four tables
     const table = TABLES[entry.entity] as any
-    const [current] = await tx.select().from(table).where(eq(table.id, entry.entityId))
+    const ownRow = and(eq(table.id, entry.entityId), eq(table.userId, userId))
+    const [current] = await tx.select().from(table).where(ownRow)
     const before = entry.before as Record<string, unknown> | null
+    const blocked = () => conflict('undo_conflict', 'Something newer is in the way, so this can’t be undone.')
 
     try {
       if (before === null) {
+        if (!current) throw blocked()
         if (entry.entity === 'transaction') {
-          await tx.update(transactions).set({ deletedAt: now }).where(eq(transactions.id, entry.entityId))
+          await tx.update(transactions).set({ deletedAt: now }).where(and(eq(transactions.id, entry.entityId), eq(transactions.userId, userId)))
         } else {
-          await tx.delete(table).where(eq(table.id, entry.entityId))
+          await tx.delete(table).where(ownRow)
         }
       } else {
-        const values = revive(before)
+        const values: Record<string, unknown> = { ...revive(before), userId }
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { id, createdAt, ...set } = values
-        await tx.insert(table).values(values).onConflictDoUpdate({ target: table.id, set })
+        const written = await tx
+          .insert(table)
+          .values(values)
+          .onConflictDoUpdate({ target: table.id, set, setWhere: eq(table.userId, userId) })
+          .returning({ id: table.id })
+        if (written.length === 0) throw blocked() // id belongs to another user: never overwrite it
       }
     } catch (err) {
-      if (pgErrorCode(err) === '23505') {
-        throw conflict('undo_conflict', 'Something newer is in the way, so this can’t be undone.')
-      }
+      const code = pgErrorCode(err)
+      if (code === '23505' || code === '23503') throw blocked() // unique key taken / referenced row gone
       throw err
     }
 
-    const [restored] = await tx.select().from(table).where(eq(table.id, entry.entityId))
+    const [restored] = await tx.select().from(table).where(ownRow)
     const restoreId = await recordAudit(tx, {
       userId,
       entity: entry.entity,
