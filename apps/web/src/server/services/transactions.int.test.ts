@@ -1,6 +1,9 @@
+import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
 import { transactionListQuerySchema, transactionPatchSchema } from '@/lib/schemas/transactions'
+import { getDb } from '@/server/db/client'
+import { auditLog } from '@/server/db/schema'
 import { undo } from './audit'
 import { createCategory, listCategories } from './categories'
 import {
@@ -57,7 +60,7 @@ describe('transactions service', () => {
     const { data } = await createTransaction('user_a', expense())
     const upd = await updateTransaction('user_a', data.id, { amount: 60_000 })
     expect(upd.data).toMatchObject({ amount: 60_000, personalShare: 60_000 })
-    await undo('user_a', upd.auditId)
+    await undo('user_a', upd.auditId!)
     const list = await listTransactions('user_a', q())
     expect(list.data[0].amount).toBe(45_000)
   })
@@ -121,5 +124,51 @@ describe('transactions service', () => {
     expect((await listTransactions('user_a', q({ q: 'toit' }))).data).toHaveLength(1)
     expect((await listTransactions('user_a', q({ q: 'food' }))).data).toHaveLength(2)
     expect((await listTransactions('user_a', q({ q: '%' }))).data).toHaveLength(1)
+  })
+
+  it('rejects a garbage cursor with a 422 on the cursor field instead of restarting at page 1', async () => {
+    await createTransaction('user_a', expense())
+    await expect(listTransactions('user_a', q({ cursor: 'not-a-cursor' }))).rejects.toMatchObject({ status: 422, field: 'cursor' })
+  })
+
+  it('rejects a cursor whose id is not a uuid with a 422, not a database error', async () => {
+    const cursor = Buffer.from('2026-01-01T00:00:00.000Z|x').toString('base64url')
+    await expect(listTransactions('user_a', q({ cursor }))).rejects.toMatchObject({ status: 422, field: 'cursor' })
+  })
+
+  it('an empty patch is a no-op: row unchanged, no audit entry, null audit id', async () => {
+    const { data } = await createTransaction('user_a', expense())
+    const before = await getDb().select().from(auditLog).where(eq(auditLog.entityId, data.id))
+    const res = await updateTransaction('user_a', data.id, {})
+    expect(res.auditId).toBeNull()
+    expect(res.data).toEqual(data)
+    const after = await getDb().select().from(auditLog).where(eq(auditLog.entityId, data.id))
+    expect(after).toHaveLength(before.length)
+  })
+
+  it('pages rows sharing the same occurredAt without loss or duplication', async () => {
+    const same = new Date(Date.UTC(2026, 9, 3, 6))
+    const ids: string[] = []
+    for (const at of [new Date(Date.UTC(2026, 9, 5, 6)), same, same, new Date(Date.UTC(2026, 9, 2, 6)), new Date(Date.UTC(2026, 9, 1, 6))]) {
+      ids.push((await createTransaction('user_a', expense({ occurredAt: at }))).data.id)
+    }
+    const seen: { id: string; at: number }[] = []
+    let cursor: string | undefined
+    do {
+      const page = await listTransactions('user_a', q({ limit: 2, cursor }))
+      seen.push(...page.data.map((t) => ({ id: t.id, at: t.occurredAt.getTime() })))
+      cursor = page.nextCursor ?? undefined
+    } while (cursor)
+    expect(seen.map((r) => r.id).sort()).toEqual([...ids].sort())
+    const expected = [...seen].sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : -1))
+    expect(seen).toEqual(expected)
+    expect(seen.map((r) => r.at)[1]).toBe(same.getTime())
+    expect(seen.map((r) => r.at)[2]).toBe(same.getTime())
+  })
+
+  it('confirmDraft and skipDraft on a confirmed transaction return 404', async () => {
+    const { data } = await createTransaction('user_a', expense())
+    await expect(confirmDraft('user_a', data.id)).rejects.toMatchObject({ status: 404 })
+    await expect(skipDraft('user_a', data.id)).rejects.toMatchObject({ status: 404 })
   })
 })

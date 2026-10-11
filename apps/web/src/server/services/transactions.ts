@@ -1,10 +1,11 @@
 import 'server-only'
 import { and, desc, eq, getTableColumns, gte, ilike, isNull, lt, or, sql } from 'drizzle-orm'
 import { addDays, istStartOfDay } from '@/lib/dates'
+import { uuid } from '@/lib/schemas/common'
 import type { TransactionCreate, TransactionListQuery, TransactionPatch } from '@/lib/schemas/transactions'
 import { getDb, type Tx } from '@/server/db/client'
 import { categories, transactions, type Transaction } from '@/server/db/schema'
-import { notFound } from '@/server/errors'
+import { invalid, notFound } from '@/server/errors'
 import { recordAudit } from './audit'
 import { requireUsableCategory } from './categories'
 
@@ -59,9 +60,12 @@ export async function createTransaction(
   return opts.tx ? run(opts.tx) : getDb().transaction(run)
 }
 
-export async function updateTransaction(userId: string, id: string, patch: TransactionPatch) {
+export async function updateTransaction(
+  userId: string, id: string, patch: TransactionPatch,
+): Promise<{ data: Transaction; auditId: string | null }> {
   return getDb().transaction(async (tx) => {
     const before = await findOwned(tx, userId, id)
+    if (Object.values(patch).every((v) => v === undefined)) return { data: before, auditId: null }
     const type = patch.type ?? before.type
     if (patch.categoryId !== undefined || patch.type !== undefined) {
       await requireUsableCategory(userId, patch.categoryId ?? before.categoryId, type, tx)
@@ -70,7 +74,7 @@ export async function updateTransaction(userId: string, id: string, patch: Trans
     const [after] = await tx
       .update(transactions)
       .set({ ...patch, note: patch.note === undefined ? before.note : (patch.note ?? null), amount, personalShare: amount })
-      .where(eq(transactions.id, id))
+      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
       .returning()
     const auditId = await recordAudit(tx, { userId, entity: 'transaction', entityId: id, action: 'update', before, after })
     return { data: after, auditId }
@@ -80,7 +84,7 @@ export async function updateTransaction(userId: string, id: string, patch: Trans
 async function softDelete(userId: string, id: string, status?: 'draft'): Promise<{ auditId: string }> {
   return getDb().transaction(async (tx) => {
     const before = await findOwned(tx, userId, id, status)
-    const [after] = await tx.update(transactions).set({ deletedAt: new Date() }).where(eq(transactions.id, id)).returning()
+    const [after] = await tx.update(transactions).set({ deletedAt: new Date() }).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).returning()
     const auditId = await recordAudit(tx, { userId, entity: 'transaction', entityId: id, action: 'delete', before, after })
     return { auditId }
   })
@@ -92,7 +96,7 @@ export const skipDraft = (userId: string, id: string) => softDelete(userId, id, 
 export async function confirmDraft(userId: string, id: string) {
   return getDb().transaction(async (tx) => {
     const before = await findOwned(tx, userId, id, 'draft')
-    const [after] = await tx.update(transactions).set({ status: 'confirmed' }).where(eq(transactions.id, id)).returning()
+    const [after] = await tx.update(transactions).set({ status: 'confirmed' }).where(and(eq(transactions.id, id), eq(transactions.userId, userId))).returning()
     const auditId = await recordAudit(tx, { userId, entity: 'transaction', entityId: id, action: 'confirm', before, after })
     return { data: after, auditId }
   })
@@ -104,7 +108,7 @@ function decodeCursor(cursor: string): { at: Date; id: string } | null {
   try {
     const [iso, id] = Buffer.from(cursor, 'base64url').toString('utf8').split('|')
     const at = new Date(iso)
-    return Number.isNaN(at.getTime()) || !id ? null : { at, id }
+    return Number.isNaN(at.getTime()) || !uuid.safeParse(id).success ? null : { at, id }
   } catch {
     return null
   }
@@ -116,6 +120,7 @@ export async function listTransactions(
   userId: string, query: TransactionListQuery,
 ): Promise<{ data: TransactionWithCategory[]; nextCursor: string | null }> {
   const cursor = query.cursor ? decodeCursor(query.cursor) : null
+  if (query.cursor && !cursor) throw invalid('cursor', 'That page link has expired — refresh the list.')
   const like = query.q ? `%${escapeLike(query.q)}%` : null
   const rows = await getDb()
     .select({
