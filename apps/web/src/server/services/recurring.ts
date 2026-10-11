@@ -33,6 +33,27 @@ function fastForward(from: ISODate, cadence: Cadence, anchorDay: number, today: 
   return d
 }
 
+/**
+ * Schedule columns a patch implies beyond what it sets directly. An explicit nextDueOn re-anchors on its own.
+ * A cadence change re-anchors to the current schedule day (anchorDay may be stale after weekly stepping);
+ * resuming a paused, overdue item skips the occurrences missed while paused.
+ */
+function impliedSchedule(
+  before: RecurringItem, patch: RecurringPatch, today: ISODate,
+): { nextDueOn?: ISODate; anchorDay?: number } {
+  if (patch.nextDueOn) return { anchorDay: dayOfMonth(patch.nextDueOn) }
+  const cadenceChanged = patch.cadence !== undefined && patch.cadence !== before.cadence
+  const resuming = patch.active === true && !before.active && before.nextDueOn < today
+  if (!cadenceChanged && !resuming) return {}
+  const cadence = patch.cadence ?? before.cadence
+  const stepAnchor = cadenceChanged ? dayOfMonth(before.nextDueOn) : before.anchorDay
+  const nextDueOn = resuming ? fastForward(before.nextDueOn, cadence, stepAnchor, today) : before.nextDueOn
+  return {
+    ...(resuming ? { nextDueOn } : {}),
+    ...(cadenceChanged ? { anchorDay: dayOfMonth(nextDueOn) } : {}),
+  }
+}
+
 export async function updateRecurring(
   userId: string, id: string, patch: RecurringPatch,
 ): Promise<{ data: RecurringItem; auditId: string | null }> {
@@ -44,15 +65,8 @@ export async function updateRecurring(
     if (patch.categoryId !== undefined || patch.kind !== undefined) {
       await requireUsableCategory(userId, patch.categoryId ?? before.categoryId, txnKind(patch.kind ?? before.kind), tx)
     }
-    // Resuming a long-paused item must not flood the user with the occurrences missed while paused.
-    const today = toISTDate(new Date())
-    const resuming = patch.active === true && !before.active && patch.nextDueOn === undefined && before.nextDueOn < today
     const [after] = await tx.update(recurringItems)
-      .set({
-        ...patch,
-        ...(patch.nextDueOn ? { anchorDay: dayOfMonth(patch.nextDueOn) } : {}),
-        ...(resuming ? { nextDueOn: fastForward(before.nextDueOn, patch.cadence ?? before.cadence, before.anchorDay, today) } : {}),
-      })
+      .set({ ...patch, ...impliedSchedule(before, patch, toISTDate(new Date())) })
       .where(and(eq(recurringItems.id, id), eq(recurringItems.userId, userId))).returning()
     const auditId = await recordAudit(tx, { userId, entity: 'recurring_item', entityId: id, action: 'update', before, after })
     return { data: after, auditId }
@@ -89,7 +103,8 @@ export async function materializeDueRecurring(userId: string, today: ISODate): P
         next = nextOccurrence(next, item.cadence, item.anchorDay)
       }
       while (next <= today) next = nextOccurrence(next, item.cadence, item.anchorDay)
-      await tx.update(recurringItems).set({ nextDueOn: next }).where(eq(recurringItems.id, item.id))
+      await tx.update(recurringItems).set({ nextDueOn: next })
+        .where(and(eq(recurringItems.id, item.id), eq(recurringItems.userId, userId)))
     }
     return created
   })

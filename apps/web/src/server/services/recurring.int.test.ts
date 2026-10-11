@@ -1,7 +1,8 @@
 import { count, eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
-import { addMonthsAnchored, clampDayInMonth, dayOfMonth, toISTDate } from '@/lib/dates'
+import { addDays, addMonthsAnchored, clampDayInMonth, dayOfMonth, toISTDate } from '@/lib/dates'
+import { nextOccurrence } from '@/lib/recurrence'
 import { transactionListQuerySchema } from '@/lib/schemas/transactions'
 import { getDb } from '@/server/db/client'
 import { auditLog, recurringItems } from '@/server/db/schema'
@@ -147,8 +148,55 @@ describe('recurring service', () => {
       const { data: resumed } = await updateRecurring('user_a', data.id, { active: true, cadence: 'weekly' })
       expect(resumed.nextDueOn >= t).toBe(true)
       expect(resumed.cadence).toBe('weekly')
+      expect(resumed.nextDueOn < addDays(t, 7)).toBe(true) // first occurrence on/after today, not a later one
       // weekly steps from 2026-01-05 (a Monday): result lands on the same weekday
       expect(new Date(`${resumed.nextDueOn}T00:00:00Z`).getUTCDay()).toBe(new Date('2026-01-05T00:00:00Z').getUTCDay())
+    })
+  })
+
+  describe('cadence change', () => {
+    // Weekly materialization moves nextDueOn off the original day while anchorDay stays put.
+    const staleAnchorWeekly = async () => {
+      const { data } = await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: '2026-01-05' }))
+      await materializeDueRecurring('user_a', '2026-01-11') // draft for Jan 5; nextDueOn -> Jan 12, anchorDay still 5
+      const [item] = await listRecurring('user_a')
+      expect(item).toMatchObject({ id: data.id, nextDueOn: '2026-01-12', anchorDay: 5 })
+      return item
+    }
+
+    it('re-anchors to the current schedule day when the cadence changes', async () => {
+      const item = await staleAnchorWeekly()
+      const { data } = await updateRecurring('user_a', item.id, { cadence: 'monthly' })
+      expect(data.anchorDay).toBe(12)
+      expect(nextOccurrence(data.nextDueOn, 'monthly', data.anchorDay)).toBe('2026-02-12')
+    })
+
+    it('keeps the anchor when the cadence is unchanged', async () => {
+      const item = await staleAnchorWeekly()
+      const { data } = await updateRecurring('user_a', item.id, { cadence: 'weekly', name: 'Rent 2' })
+      expect(data.anchorDay).toBe(5)
+    })
+
+    it('resume with a cadence change fast-forwards from the current schedule day, then re-anchors', async () => {
+      const t = toISTDate(new Date())
+      const item = await staleAnchorWeekly()
+      await updateRecurring('user_a', item.id, { active: false })
+      const { data } = await updateRecurring('user_a', item.id, { active: true, cadence: 'monthly' })
+      expect(data.nextDueOn >= t).toBe(true)
+      const [y, m] = data.nextDueOn.split('-').map(Number)
+      expect(data.nextDueOn).toBe(clampDayInMonth(y, m, 12))
+      expect(data.anchorDay).toBe(dayOfMonth(data.nextDueOn))
+    })
+  })
+
+  describe('catch-up cap', () => {
+    it('creates at most 24 drafts per item per load and leaves nextDueOn in the future', async () => {
+      const today = '2026-10-11'
+      await createRecurring('user_a', rent({ cadence: 'weekly', nextDueOn: addDays(today, -280) }))
+      expect(await materializeDueRecurring('user_a', today)).toBe(24)
+      expect((await listRecurring('user_a'))[0].nextDueOn > today).toBe(true)
+      expect(await materializeDueRecurring('user_a', today)).toBe(0)
+      expect((await drafts('user_a')).data).toHaveLength(24)
     })
   })
 })
