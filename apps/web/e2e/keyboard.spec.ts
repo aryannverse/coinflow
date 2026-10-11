@@ -8,6 +8,8 @@ test('quick add is completable from the keyboard: N, amount, Tab to a category, 
   await page.keyboard.press('n')
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(page.getByLabel('Amount')).toBeFocused() // quick add focuses the amount field itself
+  // Categories load after the dialog opens; Tab during the skeleton would land on the next control instead of a chip.
+  await expect(page.getByRole('radiogroup', { name: 'Category' })).toBeVisible()
   await page.keyboard.type('450')
   await page.keyboard.press('Tab')
   const first = page.getByRole('radiogroup', { name: 'Category' }).getByRole('radio').first() // not the Expense/Income toggle
