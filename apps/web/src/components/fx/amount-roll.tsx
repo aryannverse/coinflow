@@ -16,7 +16,8 @@ export function AmountRoll({ paise, className, fontSize = 48 }: { paise: number;
   const label = formatINR(paise)
   if (reduced || paise < 0) {
     return (
-      <span className={cn('amount', className)} data-amount={label}>
+      // Same size as the rolling digits, so reduced motion does not shrink the amount to body text.
+      <span className={cn('amount', className)} data-amount={label} style={{ fontSize, lineHeight: 1 }}>
         {label}
       </span>
     )

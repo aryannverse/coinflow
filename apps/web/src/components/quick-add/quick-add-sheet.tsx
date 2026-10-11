@@ -1,6 +1,7 @@
 'use client'
+import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { AmountRoll } from '@/components/fx/amount-roll'
 import { Spark } from '@/components/fx/spark'
 import { Button } from '@/components/ui/button'
@@ -10,9 +11,10 @@ import { Label } from '@/components/ui/label'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useCategories, useCreateTransaction, useUpdateTransaction } from '@/hooks/queries'
+import { qk, useCategories, useCreateTransaction, useUpdateTransaction, type TxnPage } from '@/hooks/queries'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { ApiError } from '@/lib/api-client'
+import { orderByRecency } from '@/lib/category-order'
 import { keypadPress, parseAmountText } from '@/lib/keypad'
 import { formatINR, MAX_AMOUNT_PAISE, paiseToRupeeString, parseRupeesToPaise } from '@/lib/money'
 import { enterOnChoice } from '@/lib/quick-add-keys'
@@ -81,6 +83,13 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
   const saving = useRef(false) // set synchronously, so a quick double Enter cannot slip in before `pending` re-renders
 
   const categories = useCategories(type)
+  const qc = useQueryClient()
+  // Recent-first chips (spec §4.6), read once per opening from the cached recent list so chips never jump while typing.
+  const [recentTxns] = useState(() => qc.getQueryData<InfiniteData<TxnPage>>(qk.transactions({}))?.pages.flatMap((p) => p.data))
+  const orderedCategories = useMemo(
+    () => (categories.data ? orderByRecency(categories.data, recentTxns, type) : []),
+    [categories.data, recentTxns, type],
+  )
   const create = useCreateTransaction()
   const update = useUpdateTransaction()
   const pending = create.isPending || update.isPending
@@ -159,7 +168,7 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
     <form ref={formRef} className="flex min-h-0 flex-1 flex-col" noValidate
       onSubmit={(e) => { e.preventDefault(); void save() }}
       onKeyDown={(e) => {
-        // Keyboard-first logging: 450, Tab to a category, Space, Enter. A choice button's own Enter would only click it.
+        // Keyboard-first logging: 450, Tab to a category, Space, Enter. Only category chips save on Enter; toggles keep native Enter.
         const action = enterOnChoice(e.nativeEvent, e.target as HTMLElement)
         if (action === 'ignore') return
         e.preventDefault()
@@ -184,7 +193,7 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
             <AmountRoll paise={paise ?? 0} fontSize={desktop ? 48 : 40} />
           </div>
           <Label htmlFor="qa-amount" className="mt-1 text-muted-foreground">Amount</Label>
-          <div className="mt-1 flex items-center gap-2 rounded-chip border bg-surface-2 px-3 focus-within:border-primary focus-within:ring-3 focus-within:ring-ring/40 has-aria-invalid:border-neutral-negative">
+          <div className="mt-1 flex items-center gap-2 rounded-chip border bg-surface-2 px-3 focus-within:border-primary focus-within:ring-3 focus-within:ring-ring has-aria-invalid:border-neutral-negative">
             <span aria-hidden className="amount text-xl text-muted-foreground">₹</span>
             <input
               id="qa-amount"
@@ -225,7 +234,7 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
             </p>
           ) : (
             <CategoryChips
-              categories={categories.data}
+              categories={orderedCategories}
               value={categoryId}
               invalid={Boolean(errorOn('categoryId'))}
               onChange={(id) => { setCategoryId(id); setFieldError(null) }}
@@ -235,7 +244,7 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
         </div>
 
         <details className="rounded-chip border bg-surface-2/50 px-3">
-          <summary className="flex min-h-12 cursor-pointer items-center rounded-chip text-sm text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/60">Note, date & method</summary>
+          <summary className="flex min-h-12 cursor-pointer items-center rounded-chip text-sm text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring">Note, date & method</summary>
           <div className="flex flex-col gap-3 pb-3 pt-1">
             <Label htmlFor="qa-note">Note</Label>
             <Input
