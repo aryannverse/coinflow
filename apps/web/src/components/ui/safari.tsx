@@ -1,6 +1,6 @@
-// Source: Magic UI safari (adapted: imageAlt, intrinsic img size)
+// Source: Magic UI safari (adapted: imageAlt, intrinsic img size, `image` slot for next/image)
 /* eslint-disable @next/next/no-img-element -- vendored: static screenshot placeholder */
-import type { HTMLAttributes } from "react"
+import type { HTMLAttributes, ReactNode } from "react"
 
 const SAFARI_WIDTH = 1203
 const SAFARI_HEIGHT = 753
@@ -22,6 +22,8 @@ export interface SafariProps extends HTMLAttributes<HTMLDivElement> {
   imageSrc?: string
   /** Text alternative for the screenshot; empty keeps it decorative. */
   imageAlt?: string
+  /** Replaces the built-in `<img>`, e.g. a `next/image` (size it with `size-full object-cover object-top`). */
+  image?: ReactNode
   videoSrc?: string
   mode?: SafariMode
 }
@@ -29,6 +31,7 @@ export interface SafariProps extends HTMLAttributes<HTMLDivElement> {
 export function Safari({
   imageSrc,
   imageAlt = "",
+  image,
   videoSrc,
   url,
   mode = "default",
@@ -37,7 +40,7 @@ export function Safari({
   ...props
 }: SafariProps) {
   const hasVideo = !!videoSrc
-  const hasMedia = hasVideo || !!imageSrc
+  const hasMedia = hasVideo || !!imageSrc || !!image
 
   return (
     <div
@@ -70,7 +73,7 @@ export function Safari({
         </div>
       )}
 
-      {!hasVideo && imageSrc && (
+      {!hasVideo && (imageSrc || image) && (
         <div
           className="pointer-events-none absolute z-0 overflow-hidden"
           style={{
@@ -81,6 +84,7 @@ export function Safari({
             borderRadius: "0 0 11px 11px",
           }}
         >
+          {image ?? (
           <img
             src={imageSrc}
             alt={imageAlt}
@@ -89,6 +93,7 @@ export function Safari({
             decoding="async"
             className="block size-full object-cover object-top"
           />
+          )}
         </div>
       )}
 

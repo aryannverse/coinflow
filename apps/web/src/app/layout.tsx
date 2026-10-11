@@ -10,6 +10,7 @@ const grotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grot
 const mono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono', display: 'swap' })
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.APP_URL ?? 'http://localhost:3000'),
   title: { default: 'Coinflow', template: '%s · Coinflow' },
   description: 'Know what’s safe to spend — then split the rest with friends.',
 }

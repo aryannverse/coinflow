@@ -5,6 +5,9 @@
  * Prereqs: `pnpm dev` running on :3000, `pnpm db:seed:demo <email>` for the demo Clerk user, and
  * `DEMO_CLERK_USER_EMAIL=<that email>` in `.env.local`. Usage: `pnpm shot:landing`.
  * (It deliberately signs in as the demo user, not the E2E user.)
+ *
+ * After recapturing, update `SHOT_ALT` in `src/components/landing/hero.tsx` so the alt text matches what the image shows.
+ * Prefer capturing against `next start`; the injected style below also hides the dev indicator.
  */
 import * as nextEnv from '@next/env'
 import { chromium } from '@playwright/test'
@@ -25,8 +28,10 @@ async function main() {
     await page.goto(`${BASE}/`)
     await clerk.signIn({ page, emailAddress: email })
     await page.goto(`${BASE}/home`)
-    await page.getByRole('heading', { name: 'Safe to spend' }).waitFor()
+    await page.getByRole('heading', { name: 'Safe to spend', exact: true }).waitFor()
     await page.waitForLoadState('networkidle')
+    // Hide the Next dev indicator so it never ends up in the screenshot (a `next start` build has none).
+    await page.addStyleTag({ content: 'nextjs-portal { display: none !important }' })
     await page.screenshot({ path: 'public/landing/home-dark.png' })
   } finally {
     await browser.close()

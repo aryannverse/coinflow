@@ -1,15 +1,16 @@
 'use client'
-import { useGSAP } from '@gsap/react'
-import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import { ArrowDown, ArrowRight } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import { useTheme } from 'next-themes'
 import { forwardRef, useRef } from 'react'
 import { AmountTicker } from '@/components/fx/amount-ticker'
 import { useMotionReady, useReducedMotion } from '@/components/providers/motion-pref'
 import { AnimatedBeam } from '@/components/ui/animated-beam'
+import { FLOW_PATH } from '@/lib/flow-palette'
 import { cn } from '@/lib/utils'
 
-gsap.registerPlugin(ScrollTrigger)
+// GSAP + ScrollTrigger load lazily and only when motion is allowed (see FlowScroll).
+const FlowScroll = dynamic(() => import('./flow-scroll'), { ssr: false })
 
 const Node = forwardRef<HTMLDivElement, { label: string; paise: number; hint?: string; lime?: boolean }>(
   ({ label, paise, hint, lime }, ref) => (
@@ -47,20 +48,8 @@ export function MoneyFlow() {
   const reduced = useReducedMotion()
   const ready = useMotionReady()
 
-  useGSAP(
-    () => {
-      // Wait for the OS preference so reduced-motion users never get the hidden start state.
-      if (reduced || !ready) return
-      gsap.from('.flow-node', {
-        y: 40,
-        opacity: 0,
-        stagger: 0.15,
-        ease: 'power3.out',
-        scrollTrigger: { trigger: container.current, start: 'top 80%', end: 'top 50%', scrub: true },
-      })
-    },
-    { scope: container, dependencies: [reduced, ready], revertOnUpdate: true },
-  )
+  const { resolvedTheme } = useTheme()
+  const beam = resolvedTheme === 'light' ? FLOW_PATH.light : FLOW_PATH.dark
 
   return (
     <section id="how" aria-labelledby="flow-title" className="mx-auto max-w-6xl scroll-mt-16 px-4 py-24 sm:py-32">
@@ -82,11 +71,28 @@ export function MoneyFlow() {
         </div>
         <Connector showAtMd={reduced} />
         <Node ref={safe} label="Safe to spend" paise={5_850_000} hint="Yours to enjoy" lime />
-        {!reduced && (
+        {!reduced && ready && <FlowScroll container={container} />}
+        {/* Client-only (after the motion preference and theme are known) so the theme-dependent colours never mismatch SSR. */}
+        {!reduced && ready && (
           <>
-            <AnimatedBeam containerRef={container} fromRef={income} toRef={bills} gradientStartColor="#C8F560" gradientStopColor="#7FD8C4" pathColor="#C8F560" pathOpacity={0.35} className="hidden md:block" />
-            <AnimatedBeam containerRef={container} fromRef={income} toRef={basics} gradientStartColor="#C8F560" gradientStopColor="#7FD8C4" delay={0.4} pathColor="#C8F560" pathOpacity={0.35} className="hidden md:block" />
-            <AnimatedBeam containerRef={container} fromRef={income} toRef={safe} gradientStartColor="#C8F560" gradientStopColor="#C8F560" delay={0.8} pathColor="#C8F560" pathOpacity={0.35} className="hidden md:block" />
+            {[
+              { to: bills, delay: 0, key: 'bills' },
+              { to: basics, delay: 0.4, key: 'basics' },
+              { to: safe, delay: 0.8, key: 'safe' },
+            ].map(({ to, delay, key }) => (
+              <AnimatedBeam
+                key={key}
+                containerRef={container}
+                fromRef={income}
+                toRef={to}
+                delay={delay}
+                pathColor={beam.path}
+                pathOpacity={beam.pathOpacity}
+                gradientStartColor={beam.start}
+                gradientStopColor={beam.stop}
+                className="hidden md:block"
+              />
+            ))}
           </>
         )}
       </div>

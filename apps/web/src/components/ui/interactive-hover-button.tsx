@@ -23,8 +23,8 @@ export function InteractiveHoverButton({
   const inner = (label: ReactNode) => (
     <>
       <div className="flex items-center justify-center gap-2">
-        <div className="bg-primary h-2 w-2 rounded-full transition-all duration-300 group-hover:scale-[100.8]"></div>
-        <span className="inline-block transition-all duration-300 group-hover:translate-x-12 group-hover:opacity-0">
+        <div className="bg-primary h-2 w-2 rounded-full transition-all duration-300 group-hover:scale-[100.8] group-focus-visible:scale-[100.8]"></div>
+        <span className="inline-block transition-all duration-300 group-hover:translate-x-12 group-hover:opacity-0 group-focus-visible:translate-x-12 group-focus-visible:opacity-0">
           {label}
         </span>
       </div>

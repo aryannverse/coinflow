@@ -1,30 +1,12 @@
 'use client'
-import gsap from 'gsap'
-import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import { ReactLenis, useLenis } from 'lenis/react'
-import { useEffect } from 'react'
+import { ReactLenis } from 'lenis/react'
+import dynamic from 'next/dynamic'
 import { useMotionReady, useReducedMotion } from './motion-pref'
 
-const LENIS_OPTIONS = { autoRaf: false, lerp: 0.12, smoothWheel: true } as const
+// GSAP is only needed to share Lenis's clock with ScrollTrigger, so it loads after hydration, not in the first JS.
+const GsapBridge = dynamic(() => import('./gsap-bridge'), { ssr: false })
 
-/** Drives Lenis from GSAP's ticker so ScrollTrigger and Lenis share one clock. */
-function GsapBridge() {
-  const lenis = useLenis()
-  useEffect(() => {
-    if (!lenis) return
-    gsap.registerPlugin(ScrollTrigger)
-    const update = (time: number) => lenis.raf(time * 1000)
-    gsap.ticker.add(update)
-    gsap.ticker.lagSmoothing(0)
-    lenis.on('scroll', ScrollTrigger.update)
-    return () => {
-      gsap.ticker.remove(update)
-      gsap.ticker.lagSmoothing(500, 33)
-      lenis.off('scroll', ScrollTrigger.update)
-    }
-  }, [lenis])
-  return null
-}
+const LENIS_OPTIONS = { autoRaf: false, lerp: 0.12, smoothWheel: true } as const
 
 /**
  * Smooth scrolling, mounted only when the OS preference is known AND motion is not reduced

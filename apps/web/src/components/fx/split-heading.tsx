@@ -1,11 +1,29 @@
-'use client'
-import SplitText from '@/components/reactbits/SplitText'
-import { useReducedMotion } from '@/components/providers/motion-pref'
-
-/** Per-character heading entrance; a plain heading when motion is reduced. */
+/**
+ * Per-character heading entrance, pure CSS so it renders on the server and is never hidden by JS:
+ * each word is an inline-block (so wrapping stays word-based) and each character rises in with a staggered
+ * `animation-delay` (`.hero-char` in globals.css). The animated copy is aria-hidden; one sr-only copy carries
+ * the heading text for assistive tech. Reduced motion (OS query or the in-app override) shows static text.
+ */
 export function SplitHeading({ as = 'h1', id, text, className }: { as?: 'h1' | 'h2'; id?: string; text: string; className?: string }) {
-  const reduced = useReducedMotion()
   const Tag = as
-  if (reduced) return <Tag id={id} className={className}>{text}</Tag>
-  return <SplitText tag={as} id={id} text={text} className={className} delay={30} splitType="chars" textAlign="inherit" />
+  let index = 0
+  return (
+    <Tag id={id} className={className}>
+      <span className="sr-only">{text}</span>
+      <span aria-hidden>
+        {text.split(' ').map((word, w) => (
+          <span key={w}>
+            {w > 0 ? ' ' : null}
+            <span className="inline-block whitespace-nowrap">
+              {[...word].map((char, c) => (
+                <span key={c} className="hero-char inline-block" style={{ '--i': index++ } as React.CSSProperties}>
+                  {char}
+                </span>
+              ))}
+            </span>
+          </span>
+        ))}
+      </span>
+    </Tag>
+  )
 }

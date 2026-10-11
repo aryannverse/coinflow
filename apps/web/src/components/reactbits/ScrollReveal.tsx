@@ -1,4 +1,4 @@
-// Source: React Bits ScrollReveal-TS-TW (reactbits.dev registry) (adapted: id prop; cleanup reverts only its own gsap.context, not every ScrollTrigger on the page)
+// Source: React Bits ScrollReveal-TS-TW (reactbits.dev registry) (adapted: id prop; p-in-h2 -> block span; cleanup reverts only its own gsap.context, not every ScrollTrigger on the page)
 'use client';
 
 import React, { useEffect, useRef, useMemo, type ReactNode, type RefObject } from 'react';
@@ -116,7 +116,7 @@ const ScrollReveal: React.FC<ScrollRevealProps> = ({
 
   return (
     <h2 ref={containerRef} id={id} className={`my-5 ${containerClassName}`}>
-      <p className={`text-[clamp(1.6rem,4vw,3rem)] leading-[1.5] font-semibold ${textClassName}`}>{splitText}</p>
+      <span className={`block text-[clamp(1.6rem,4vw,3rem)] leading-[1.5] font-semibold ${textClassName}`}>{splitText}</span>
     </h2>
   );
 };

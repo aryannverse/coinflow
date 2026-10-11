@@ -1,12 +1,12 @@
 'use client'
+import Image from 'next/image'
 import { HeroBackground } from '@/components/fx/hero-background'
 import { AmountTicker } from '@/components/fx/amount-ticker'
-import { Reveal } from '@/components/fx/reveal'
 import { SplitHeading } from '@/components/fx/split-heading'
 import { Safari } from '@/components/ui/safari'
 
-const SHOT_ALT =
-  'Coinflow’s Home screen in dark mode: Safe to spend ₹18,450 until payday, three upcoming bills (Rent, Netflix, Jio), recent spends like a Swiggy biryani, an Uber and a Blinkit order, and two bills waiting for you to confirm.'
+// Keep in sync with the screenshot: update after running `pnpm shot:landing` against the real demo user.
+const SHOT_ALT = 'Coinflow Home screen: Safe to spend ₹18,450, three upcoming bills and recent spends.'
 
 /** `cta` is a server-rendered slot (Clerk `Show` picks Start free / Open Coinflow) so it is in the first HTML. */
 export function Hero({ cta }: { cta: React.ReactNode }) {
@@ -37,10 +37,24 @@ export function Hero({ cta }: { cta: React.ReactNode }) {
           </a>
         </div>
 
-        <Reveal delay={0.2} className="relative mt-16 w-full max-w-5xl">
+        <div className="hero-lift relative mt-16 w-full max-w-5xl [animation-delay:250ms]">
           <div aria-hidden className="absolute inset-x-[8%] -top-6 bottom-10 -z-10 rounded-full bg-lime/20 blur-3xl" />
           <div className="[mask-image:linear-gradient(to_bottom,#000_70%,transparent_100%)]">
-            <Safari url="coinflow.local/home" imageSrc="/landing/home-dark.png" imageAlt={SHOT_ALT} className="size-full" />
+            <Safari
+              url="coinflow.local/home"
+              className="size-full"
+              image={
+                <Image
+                  src="/landing/home-dark.png"
+                  width={1440}
+                  height={900}
+                  sizes="(min-width:1024px) 1024px, 100vw"
+                  alt={SHOT_ALT}
+                  fetchPriority="high"
+                  className="block size-full object-cover object-top"
+                />
+              }
+            />
           </div>
           <div className="absolute -top-10 right-2 flex items-center gap-3 rounded-tile border bg-card/90 px-4 py-3 text-left shadow-xl backdrop-blur sm:right-8 sm:-top-12">
             <span aria-hidden className="grid size-9 place-items-center rounded-full bg-lime text-sm font-bold text-[#0F1210]">₹</span>
@@ -49,7 +63,7 @@ export function Hero({ cta }: { cta: React.ReactNode }) {
               <AmountTicker paise={1_845_000} className="block text-xl font-bold leading-tight sm:text-2xl" />
             </div>
           </div>
-        </Reveal>
+        </div>
       </div>
     </section>
   )
