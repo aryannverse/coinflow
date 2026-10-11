@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, addMonthsAnchored, clampDayInMonth, diffDays, istStartOfDay, toISTDate } from './dates'
+import { addDays, addMonthsAnchored, clampDayInMonth, diffDays, formatISODate, istStartOfDay, toISTDate } from './dates'
 
 describe('dates', () => {
   it('converts instants to the IST calendar day', () => {
@@ -23,5 +23,9 @@ describe('dates', () => {
     expect(addMonthsAnchored('2026-01-31', 1, 31)).toBe('2026-02-28')
     expect(addMonthsAnchored('2026-02-28', 1, 31)).toBe('2026-03-31')
     expect(addMonthsAnchored('2024-02-29', 12, 29)).toBe('2025-02-28')
+  })
+  it('formats an ISODate without shifting the day', () => {
+    expect(formatISODate('2026-10-01')).toBe('1 Oct')
+    expect(formatISODate('2026-12-31')).toBe('31 Dec')
   })
 })

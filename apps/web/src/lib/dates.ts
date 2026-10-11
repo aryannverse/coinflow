@@ -52,3 +52,8 @@ export function addMonthsAnchored(d: ISODate, months: number, anchorDay: number)
 export function dayOfMonth(d: ISODate): number {
   return parts(d).day
 }
+
+/** Display an ISODate. Parsed as UTC midnight and formatted in UTC, so the day never shifts and server/client agree (R37). */
+export function formatISODate(d: ISODate, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }): string {
+  return new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { ...opts, timeZone: 'UTC' })
+}

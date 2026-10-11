@@ -107,12 +107,12 @@ export const useTransactions = (filters: TxnFilters) =>
     queryFn: ({ pageParam }) => api<TxnPage>(`/transactions${qs({ ...filters, cursor: pageParam })}`),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   })
-export const useDrafts = () =>
-  useQuery({ queryKey: qk.drafts, queryFn: () => api<{ data: TransactionDTO[] }>('/transactions?status=draft').then((r) => r.data) })
+export const useDrafts = (initial?: TransactionDTO[]) =>
+  useQuery({ queryKey: qk.drafts, queryFn: () => api<{ data: TransactionDTO[] }>('/transactions?status=draft').then((r) => r.data), initialData: initial })
 export const useRecurring = () => useQuery({ queryKey: qk.recurring, queryFn: () => api<{ data: RecurringDTO[] }>('/recurring').then((r) => r.data) })
 export const useBudgets = () => useQuery({ queryKey: qk.budgets, queryFn: () => api<{ data: BudgetDTO[] }>('/budgets').then((r) => r.data) })
-export const useInsights = (from: string, to: string) =>
-  useQuery({ queryKey: qk.insights(from, to), queryFn: () => api<{ data: InsightsDTO }>(`/insights${qs({ from, to })}`).then((r) => r.data) })
+export const useInsights = (from: string, to: string, initial?: InsightsDTO) =>
+  useQuery({ queryKey: qk.insights(from, to), queryFn: () => api<{ data: InsightsDTO }>(`/insights${qs({ from, to })}`).then((r) => r.data), initialData: initial })
 
 const verb = (t: { type: string }) => (t.type === 'income' ? 'income' : 'expense')
 
