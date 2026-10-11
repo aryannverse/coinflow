@@ -8,6 +8,9 @@ export type StsView = {
   tone: 'default' | 'neutral-negative'
 }
 
+/** Whole rupees, rounded down: the hero never promises more than is there, and paise are noise at this size. */
+const floorToRupee = (paise: number) => Math.floor(paise / 100) * 100
+
 /** Copy for the Safe-to-Spend hero. Negative is never alarming: ₹0 free, plus a plain statement of the gap. */
 export function stsDisplay(r: { status: 'ok' | 'unknown'; amount: number; dailyPace: number; daysLeft: number }): StsView {
   if (r.status === 'unknown') return { headline: null, line: 'Check in your balance to see this', tone: 'default' }
@@ -15,5 +18,5 @@ export function stsDisplay(r: { status: 'ok' | 'unknown'; amount: number; dailyP
     return { headline: 0, suffix: 'free this cycle', line: `${formatINR(-r.amount)} more committed than available`, tone: 'neutral-negative' }
   }
   const days = r.daysLeft === 1 ? '1 day' : `${r.daysLeft} days`
-  return { headline: r.amount, line: `≈ ${formatINR(r.dailyPace)}/day for ${days}`, tone: 'default' }
+  return { headline: floorToRupee(r.amount), line: `≈ ${formatINR(floorToRupee(r.dailyPace))}/day for ${days}`, tone: 'default' }
 }

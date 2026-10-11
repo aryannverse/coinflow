@@ -4,7 +4,13 @@ import { stsDisplay } from './sts-display'
 describe('stsDisplay', () => {
   it('positive: amount + daily pace', () => {
     expect(stsDisplay({ status: 'ok', amount: 1_845_000, dailyPace: 92_250, daysLeft: 20 }))
-      .toEqual({ headline: 1_845_000, line: '≈ ₹922.50/day for 20 days', tone: 'default' })
+      .toEqual({ headline: 1_845_000, line: '≈ ₹922/day for 20 days', tone: 'default' })
+  })
+  it('positive: whole rupees, rounded down, for both the headline and the pace', () => {
+    expect(stsDisplay({ status: 'ok', amount: 3_672_171, dailyPace: 183_608, daysLeft: 20 }))
+      .toEqual({ headline: 3_672_100, line: '≈ ₹1,836/day for 20 days', tone: 'default' })
+    expect(stsDisplay({ status: 'ok', amount: 99, dailyPace: 99, daysLeft: 2 }))
+      .toEqual({ headline: 0, line: '≈ ₹0/day for 2 days', tone: 'default' })
   })
   it('negative: ₹0 headline with a "free this cycle" suffix and neutral, non-punitive copy (R26)', () => {
     expect(stsDisplay({ status: 'ok', amount: -40_000, dailyPace: 0, daysLeft: 9 }))
