@@ -29,16 +29,20 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
    * Confirmed rows: stamped after the check-in, or logged after it with a time the client rounded down to the
    * minute (or a slightly slow clock). A back-dated row from before that minute is already in the balance.
    * Drafts: due on or after the check-in's IST day, so a bill due today still counts after a later check-in.
+   * Confirmed recurring rows follow the draft rule: confirming a due-today draft must not change the amount, so
+   * the confirmed row keeps counting from the check-in's IST day (its occurredAt is the 12:00 IST due stamp).
    */
   const since = checkin
     ? (type: 'expense' | 'income', status: 'confirmed' | 'draft') => {
         const { takenAt } = checkin
         const takenMinute = new Date(Math.floor(takenAt.getTime() / 60_000) * 60_000) // date_trunc('minute'); IST is minute-aligned
+        const checkinDayStart = istStartOfDay(toISTDate(takenAt))
         const boundary = status === 'draft'
-          ? gte(transactions.occurredAt, istStartOfDay(toISTDate(takenAt)))
+          ? gte(transactions.occurredAt, checkinDayStart)
           : or(
               gt(transactions.occurredAt, takenAt),
               and(gt(transactions.createdAt, takenAt), gte(transactions.occurredAt, takenMinute)),
+              and(eq(transactions.source, 'recurring'), gte(transactions.occurredAt, checkinDayStart)),
             )
         return and(
           eq(transactions.userId, userId), isNull(transactions.deletedAt),

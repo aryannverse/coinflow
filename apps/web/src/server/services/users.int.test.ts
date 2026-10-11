@@ -31,10 +31,15 @@ describe('users service', () => {
     await expect(requireCurrentUser()).rejects.toMatchObject({ status: 401 })
   })
 
-  it('upsert updates email/name/avatar from Clerk', async () => {
-    await makeUser('user_a')
-    const u = await upsertUserFromProfile({ id: 'user_a', email: 'changed@example.com', name: 'Asha', avatarUrl: null })
-    expect(u).toMatchObject({ email: 'changed@example.com', name: 'Asha' })
+  it('upsert updates email/avatar from Clerk but keeps the in-app name', async () => {
+    await makeUser('user_a', { name: 'Edited Name' })
+    const u = await upsertUserFromProfile({ id: 'user_a', email: 'changed@example.com', name: 'Asha', avatarUrl: 'https://img.example/a.png' })
+    expect(u).toMatchObject({ email: 'changed@example.com', name: 'Edited Name', avatarUrl: 'https://img.example/a.png' })
+  })
+
+  it('upsert sets the Clerk name on first insert', async () => {
+    const u = await upsertUserFromProfile({ id: 'user_new', email: 'n@example.com', name: 'Asha', avatarUrl: null })
+    expect(u.name).toBe('Asha')
   })
 
   it('updateMe sets onboardedAt when onboarded=true and keeps other fields', async () => {

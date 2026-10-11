@@ -41,6 +41,13 @@ describe('POST /api/webhooks/clerk', () => {
     expect(await getUser('user_w')).toMatchObject({ email: 'w@example.com', name: 'Asha K' })
   })
 
+  it('user.updated refreshes email but keeps a name edited in the app', async () => {
+    await makeUser('user_u', { name: 'Edited Name' })
+    const evt = { type: 'user.updated', data: clerkUser('user_u', 'renamed@example.com'), object: 'event' }
+    expect((await POST(signed(evt))).status).toBe(200)
+    expect(await getUser('user_u')).toMatchObject({ email: 'renamed@example.com', name: 'Edited Name' })
+  })
+
   it('deletes users on user.deleted', async () => {
     await makeUser('user_d')
     const res = await POST(signed({ type: 'user.deleted', data: { id: 'user_d', deleted: true }, object: 'event' }))

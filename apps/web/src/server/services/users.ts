@@ -27,7 +27,8 @@ export async function upsertUserFromProfile(p: UserProfile): Promise<User> {
       .values({ id: p.id, email: p.email, name: p.name, avatarUrl: p.avatarUrl })
       .onConflictDoUpdate({
         target: users.id,
-        set: { email: p.email, name: p.name, avatarUrl: p.avatarUrl, updatedAt: new Date() },
+        // name is set on first insert only: the in-app name wins over later Clerk syncs (ruling R20).
+        set: { email: p.email, avatarUrl: p.avatarUrl, updatedAt: new Date() },
       })
       .returning()
     return row
