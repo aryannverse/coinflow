@@ -111,7 +111,8 @@ export const useTransactions = (filters: TxnFilters) =>
   })
 export const useDrafts = (initial?: TransactionDTO[]) =>
   useQuery({ queryKey: qk.drafts, queryFn: () => api<{ data: TransactionDTO[] }>('/transactions?status=draft').then((r) => r.data), initialData: initial })
-export const useRecurring = () => useQuery({ queryKey: qk.recurring, queryFn: () => api<{ data: RecurringDTO[] }>('/recurring').then((r) => r.data) })
+export const useRecurring = (initial?: RecurringDTO[]) =>
+  useQuery({ queryKey: qk.recurring, queryFn: () => api<{ data: RecurringDTO[] }>('/recurring').then((r) => r.data), initialData: initial })
 export const useBudgets = () => useQuery({ queryKey: qk.budgets, queryFn: () => api<{ data: BudgetDTO[] }>('/budgets').then((r) => r.data) })
 export const useInsights = (from: string, to: string, initial?: InsightsDTO, enabled = true) =>
   useQuery({ queryKey: qk.insights(from, to), queryFn: () => api<{ data: InsightsDTO }>(`/insights${qs({ from, to })}`).then((r) => r.data), initialData: initial, enabled })
