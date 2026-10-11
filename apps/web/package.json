@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test:int": "vitest run --config vitest.int.config.mts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed:demo": "tsx --conditions=react-server scripts/seed-demo.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.14",
