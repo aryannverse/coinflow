@@ -9,7 +9,7 @@ import { METHODS } from '@/lib/activity-filters'
 import { formatINR } from '@/lib/money'
 
 const SWIPE_TO_DELETE = -80
-const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/60'
+const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring'
 
 const methodLabel = (m: string) => METHODS.find((x) => x.value === m)?.label ?? m
 const timeLabel = (iso: string) =>

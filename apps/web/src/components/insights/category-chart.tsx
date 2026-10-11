@@ -60,17 +60,20 @@ export function CategoryChart({ data }: { data: InsightsDTO }) {
           )
         })}
       </div>
-      <table className="sr-only">
-        <caption>Spending by category, {caption}</caption>
-        <thead>
-          <tr><th scope="col">Category</th><th scope="col">This period</th><th scope="col">Previous</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <tr key={c.categoryId}><th scope="row">{c.name}</th><td>{formatINR(c.amount)}</td><td>{formatINR(c.previous)}</td></tr>
-          ))}
-        </tbody>
-      </table>
+      {/* sr-only on a wrapper: a <table> ignores the clip, so it overflowed to 707px at 390 (WCAG 1.4.10). */}
+      <div className="sr-only">
+        <table>
+          <caption>Spending by category, {caption}</caption>
+          <thead>
+            <tr><th scope="col">Category</th><th scope="col">This period</th><th scope="col">Previous</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => (
+              <tr key={c.categoryId}><th scope="row">{c.name}</th><td>{formatINR(c.amount)}</td><td>{formatINR(c.previous)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   )
 }

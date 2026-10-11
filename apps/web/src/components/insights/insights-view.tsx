@@ -101,13 +101,13 @@ export function InsightsView() {
           )}
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-5">
+      <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
         {failure ? (
           <Reveal className="lg:col-span-5"><Tile>{failure}</Tile></Reveal>
         ) : (
           <>
-            <Reveal className="lg:col-span-3"><Tile className="h-full">{data ? <SpendChart data={data} /> : <ChartSkeleton />}</Tile></Reveal>
-            <Reveal delay={0.05} className="lg:col-span-2"><Tile className="h-full">{data ? <CategoryChart data={data} /> : <ChartSkeleton />}</Tile></Reveal>
+            <Reveal className="lg:col-span-3"><Tile>{data ? <SpendChart data={data} /> : <ChartSkeleton />}</Tile></Reveal>
+            <Reveal delay={0.05} className="lg:col-span-2"><Tile>{data ? <CategoryChart data={data} /> : <ChartSkeleton />}</Tile></Reveal>
           </>
         )}
         <Reveal delay={0.1} className="lg:col-span-5"><BudgetsPanel /></Reveal>

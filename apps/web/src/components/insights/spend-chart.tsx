@@ -79,21 +79,24 @@ export function SpendChart({ data }: { data: InsightsDTO }) {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <table className="sr-only">
-        <caption>Daily spending and running total, {summary}</caption>
-        <thead>
-          <tr><th scope="col">Date</th><th scope="col">Spent</th><th scope="col">Running total</th></tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.date}>
-              <th scope="row">{day(r.date)}</th>
-              <td>{formatINR(r.expense)}</td>
-              <td>{formatINR(r.total)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* sr-only on a wrapper: a <table> ignores the clip, so it overflowed to 707px at 390 (WCAG 1.4.10). */}
+      <div className="sr-only">
+        <table>
+          <caption>Daily spending and running total, {summary}</caption>
+          <thead>
+            <tr><th scope="col">Date</th><th scope="col">Spent</th><th scope="col">Running total</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.date}>
+                <th scope="row">{day(r.date)}</th>
+                <td>{formatINR(r.expense)}</td>
+                <td>{formatINR(r.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   )
 }

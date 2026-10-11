@@ -14,7 +14,7 @@ import { formatINR } from '@/lib/money'
 import { FiltersBar } from './filters-bar'
 import { TransactionRow } from './transaction-row'
 
-const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/60'
+const RING = 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring'
 
 export function ActivityView() {
   const params = useSearchParams()

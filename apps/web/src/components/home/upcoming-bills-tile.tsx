@@ -18,7 +18,7 @@ export function UpcomingBillsTile({ today, cycleEnd, initial }: { today: string;
         {/* The main route to Recurring on mobile, so it is always here, not only when empty. */}
         <Link
           href="/recurring"
-          className="-mr-2 flex min-h-12 min-w-12 items-center justify-center rounded-chip px-2 text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/60 active:scale-[0.97]"
+          className="-mr-2 flex min-h-12 min-w-12 items-center justify-center rounded-chip px-2 text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring active:scale-[0.97]"
         >
           Manage
         </Link>

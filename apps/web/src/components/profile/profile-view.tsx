@@ -59,8 +59,9 @@ const MOTION = [
 type ThemeValue = (typeof THEMES)[number]['value']
 const isTheme = (v: string | undefined): v is ThemeValue => THEMES.some((t) => t.value === v)
 
+// h-auto/whitespace-normal let a long label ("✓ Match device") wrap at 320–390 px instead of clipping; min-h-12 keeps the 48 px target.
 const choiceClass =
-  'min-h-12 flex-1 gap-1.5 rounded-chip border px-3 active:scale-[0.97] data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
+  'min-h-12 h-auto min-w-0 flex-1 shrink gap-1.5 whitespace-normal rounded-chip border px-3 py-2 text-center leading-tight active:scale-[0.97] data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground'
 
 /** Polite live region, always mounted so a change in text is announced. Shows a tick beside the words. */
 function SaveNote({ text }: { text: string }) {
@@ -446,7 +447,7 @@ export function ProfileView({ initial }: { initial?: MeDTO }) {
             href="/recurring"
             className={cn(
               'mt-3 flex min-h-12 items-center justify-between gap-3 rounded-chip border px-4 py-2 font-medium outline-none',
-              'hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/50 active:scale-[0.97]',
+              'hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring active:scale-[0.97]',
             )}
           >
             Recurring bills & income

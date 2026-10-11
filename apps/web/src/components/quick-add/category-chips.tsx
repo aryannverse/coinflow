@@ -40,7 +40,7 @@ export function CategoryChips({ categories, value, onChange, invalid }: {
             onClick={() => onChange(c.id)}
             whileTap={{ scale: 0.95 }}
             className={cn(
-              'flex min-h-12 items-center gap-2 rounded-chip border px-3 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/60',
+              'flex min-h-12 items-center gap-2 rounded-chip border px-3 text-sm outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring',
               selected ? 'border-primary bg-primary text-primary-foreground' : 'bg-surface-2 hover:border-primary/50',
             )}
           >

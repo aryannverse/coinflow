@@ -6,7 +6,9 @@ import { useMotionReady, useReducedMotion } from './motion-pref'
 // GSAP is only needed to share Lenis's clock with ScrollTrigger, so it loads after hydration, not in the first JS.
 const GsapBridge = dynamic(() => import('./gsap-bridge'), { ssr: false })
 
-const LENIS_OPTIONS = { autoRaf: false, lerp: 0.12, smoothWheel: true } as const
+// allowNestedScroll: wheel events inside a scrollable descendant (palette list, sheets) scroll that
+// element natively instead of being swallowed by the root smooth scroll.
+const LENIS_OPTIONS = { autoRaf: false, lerp: 0.12, smoothWheel: true, allowNestedScroll: true } as const
 
 /**
  * Smooth scrolling, mounted only when the OS preference is known AND motion is not reduced

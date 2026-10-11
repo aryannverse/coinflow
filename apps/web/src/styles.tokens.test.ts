@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from './lib/contrast'
 import { FLOW_PATH } from './lib/flow-palette'
@@ -19,6 +19,8 @@ const PAIRS: [string, string, number][] = [
   ['primary', 'background', 3], ['destructive', 'card', 3],
   // slider: unfilled track and thumb border (foreground) vs card/track, filled primary vs thumb face (card)
   ['track', 'card', 3], ['foreground', 'track', 3], ['card', 'primary', 3],
+  // focus ring (WCAG 1.4.11): the solid ring against the surfaces it is drawn on
+  ['ring', 'card', 3], ['ring', 'background', 3],
 ]
 
 describe.each([[':root', 'light'], ['.dark', 'dark']])('%s tokens (%s)', (selector) => {
@@ -56,5 +58,16 @@ describe.each([[':root', 'light'], ['.dark', 'dark']] as const)('money-flow beam
   it('keeps the blended path >= 3:1 against the page (WCAG 1.4.11)', () => {
     const blended = worstCasePixel(flow.path, flow.background, flow.pathOpacity)
     expect(contrastRatio(blended, flow.background)).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('focus rings (WCAG 1.4.11)', () => {
+  // A translucent ring (ring-ring) blends toward the surface and drops below 3:1 in the light theme;
+  // the token pairs above only hold for the solid ring.
+  const src = new URL('./', import.meta.url)
+  const files = (readdirSync(src, { recursive: true }) as string[]).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f))
+  it('uses the solid ring token everywhere', () => {
+    const offenders = files.filter((f) => /\b(ring|outline)-ring\/\d+/.test(readFileSync(new URL(f, src), 'utf8')))
+    expect(offenders).toEqual([])
   })
 })

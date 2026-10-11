@@ -145,8 +145,12 @@
   }}
 
 @layer base {
-  * { @apply border-border outline-ring/60; }
+  * { @apply border-border outline-ring; }
   html { color-scheme: dark; }
+  /* WCAG 2.4.11: keyboard focus scrolled into view must clear the sticky top bar (4rem) / landing nav, and on
+     mobile the bottom tabs plus the floating Ask pill (bottom-20 + pill); on desktop only the pill. */
+  :root { scroll-padding-top: 4.5rem; scroll-padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
+  @media (min-width: 1024px) { :root { scroll-padding-bottom: 6rem; } }
   html:not(.dark) { color-scheme: light; }
   body { @apply bg-background text-foreground font-sans antialiased; }
   .amount { @apply font-display tabular-nums tracking-tight; }
@@ -157,6 +161,18 @@
     animation-iteration-count: 1 !important;
     transition-duration: 120ms !important;
     scroll-behavior: auto !important;
+  }
+  /* Same rule before hydration (data-reduce-motion not yet set) for OS-reduce users, so the Shimmer and
+     Marquee keyframes never start; an explicit in-app "off" (data-reduce-motion="false") opts out. */
+  @media (prefers-reduced-motion: reduce) {
+    html:not([data-reduce-motion="false"]) *,
+    html:not([data-reduce-motion="false"]) *::before,
+    html:not([data-reduce-motion="false"]) *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 120ms !important;
+      scroll-behavior: auto !important;
+    }
   }
   html.lenis, html.lenis body { height: auto; }
   .lenis.lenis-smooth { scroll-behavior: auto !important; }

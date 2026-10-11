@@ -13,7 +13,7 @@ export function Keypad({ onKey }: { onKey: (k: string) => void }) {
           type="button"
           onClick={() => onKey(k)}
           aria-label={k === 'back' ? 'Delete digit' : k === '.' ? 'Decimal point' : k}
-          className="grid min-h-12 place-items-center rounded-chip bg-surface-2 font-display text-xl outline-none transition active:scale-[0.95] active:bg-accent focus-visible:ring-3 focus-visible:ring-ring/60"
+          className="grid min-h-12 place-items-center rounded-chip bg-surface-2 font-display text-xl outline-none transition active:scale-[0.95] active:bg-accent focus-visible:ring-3 focus-visible:ring-ring"
         >
           {k === 'back' ? <Delete className="size-5" aria-hidden /> : k}
         </button>
