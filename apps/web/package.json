@@ -20,7 +20,9 @@
     "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "svix": "^2.8.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@next/env": "16.4.0",
