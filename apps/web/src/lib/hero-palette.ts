@@ -1,11 +1,15 @@
 /**
  * Dither colours + canvas opacity per theme. Colours mirror the design tokens (`--background`, `--lime`);
- * `styles.tokens.test.ts` asserts the match and that the worst-case pixel keeps body text at >= 4.5:1.
+ * `styles.tokens.test.ts` asserts the match and that the worst-case pixel keeps body text at >= 4.5:1,
+ * both for the wave colour and for the shader's brightest output (`SHADER_EXTREME`).
  */
 export const HERO_DITHER = {
-  dark: { wave: '#C8F560', background: '#0E100F', opacity: 0.18 },
+  dark: { wave: '#C8F560', background: '#0E100F', opacity: 0.15 },
   light: { wave: '#C8F560', background: '#F4F6F1', opacity: 0.5 },
 } as const
+
+/** Dither shader's brightest possible output (linear 1, 1, 0.33 -> sRGB), well above the wave colour itself. */
+export const SHADER_EXTREME = '#ffff9e'
 
 const channel = (hex: string, i: number) => parseInt(hex.slice(i, i + 2), 16)
 

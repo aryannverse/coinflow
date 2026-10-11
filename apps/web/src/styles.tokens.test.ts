@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from './lib/contrast'
-import { HERO_DITHER, worstCasePixel } from './lib/hero-palette'
+import { HERO_DITHER, SHADER_EXTREME, worstCasePixel } from './lib/hero-palette'
 
 const css = readFileSync(new URL('./app/globals.css', import.meta.url), 'utf8')
 
@@ -38,6 +38,10 @@ describe.each([[':root', 'light'], ['.dark', 'dark']] as const)('hero dither (%s
   })
   it.each([['foreground'], ['muted-foreground']])('keeps %s text >= 4.5:1 over the worst-case pixel', (fg) => {
     const worst = worstCasePixel(hero.wave, hero.background, hero.opacity)
+    expect(contrastRatio(t[fg], worst)).toBeGreaterThanOrEqual(4.5)
+  })
+  it.each([['foreground'], ['muted-foreground']])('keeps %s text >= 4.5:1 at the shader extreme', (fg) => {
+    const worst = worstCasePixel(SHADER_EXTREME, hero.background, hero.opacity)
     expect(contrastRatio(t[fg], worst)).toBeGreaterThanOrEqual(4.5)
   })
 })

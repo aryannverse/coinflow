@@ -1,5 +1,6 @@
-// Source: Magic UI shimmer-button
+// Source: Magic UI shimmer-button (adapted: asChild)
 import React, { type ComponentPropsWithoutRef, type CSSProperties } from "react"
+import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
@@ -11,6 +12,8 @@ export interface ShimmerButtonProps extends ComponentPropsWithoutRef<"button"> {
   background?: string
   className?: string
   children?: React.ReactNode
+  /** Render onto the single child element (e.g. a `next/link`) instead of a `<button>`; never nest a button in a link. */
+  asChild?: boolean
 }
 
 export const ShimmerButton = React.forwardRef<
@@ -24,14 +27,16 @@ export const ShimmerButton = React.forwardRef<
       shimmerDuration = "3s",
       borderRadius = "100px",
       background = "rgba(0, 0, 0, 1)",
+      asChild = false,
       className,
       children,
       ...props
     },
     ref
   ) => {
+    const Comp = asChild ? Slot.Root : "button"
     return (
-      <button
+      <Comp
         style={
           {
             "--spread": "90deg",
@@ -63,7 +68,7 @@ export const ShimmerButton = React.forwardRef<
             <div className="animate-spin-around absolute -inset-full w-auto [translate:0_0] rotate-0 [background:conic-gradient(from_calc(270deg-(var(--spread)*0.5)),transparent_0,var(--shimmer-color)_var(--spread),transparent_var(--spread))]" />
           </div>
         </div>
-        {children}
+        {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
 
         {/* Highlight */}
         <div
@@ -89,7 +94,7 @@ export const ShimmerButton = React.forwardRef<
             "absolute inset-(--cut) -z-20 [border-radius:var(--radius)] [background:var(--bg)]"
           )}
         />
-      </button>
+      </Comp>
     )
   }
 )

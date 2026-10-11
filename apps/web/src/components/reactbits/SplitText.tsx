@@ -1,4 +1,4 @@
-// Source: React Bits SplitText-TS-TW (reactbits.dev registry)
+// Source: React Bits SplitText-TS-TW (reactbits.dev registry) (adapted: id prop)
 /* eslint-disable react-hooks/set-state-in-effect, @typescript-eslint/no-unused-vars -- vendored: one-shot fonts-ready flag; unused catch bindings */
 'use client';
 
@@ -13,6 +13,7 @@ gsap.registerPlugin(ScrollTrigger, GSAPSplitText, useGSAP);
 export interface SplitTextProps {
   text: string;
   className?: string;
+  id?: string;
   delay?: number;
   duration?: number;
   ease?: string | ((t: number) => number);
@@ -29,6 +30,7 @@ export interface SplitTextProps {
 const SplitText: React.FC<SplitTextProps> = ({
   text,
   className = '',
+  id,
   delay = 50,
   duration = 1.25,
   ease = 'power3.out',
@@ -169,7 +171,7 @@ const SplitText: React.FC<SplitTextProps> = ({
     const Tag = tag || 'p';
 
     return (
-      <Tag ref={ref} style={style} className={classes}>
+      <Tag ref={ref} id={id} style={style} className={classes}>
         {text}
       </Tag>
     );

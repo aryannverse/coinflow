@@ -1,4 +1,4 @@
-// Source: Magic UI safari
+// Source: Magic UI safari (adapted: imageAlt, intrinsic img size)
 /* eslint-disable @next/next/no-img-element -- vendored: static screenshot placeholder */
 import type { HTMLAttributes } from "react"
 
@@ -20,12 +20,15 @@ type SafariMode = "default" | "simple"
 export interface SafariProps extends HTMLAttributes<HTMLDivElement> {
   url?: string
   imageSrc?: string
+  /** Text alternative for the screenshot; empty keeps it decorative. */
+  imageAlt?: string
   videoSrc?: string
   mode?: SafariMode
 }
 
 export function Safari({
   imageSrc,
+  imageAlt = "",
   videoSrc,
   url,
   mode = "default",
@@ -80,13 +83,17 @@ export function Safari({
         >
           <img
             src={imageSrc}
-            alt=""
+            alt={imageAlt}
+            width={SCREEN_WIDTH}
+            height={SCREEN_HEIGHT}
+            decoding="async"
             className="block size-full object-cover object-top"
           />
         </div>
       )}
 
       <svg
+        aria-hidden
         viewBox={`0 0 ${SAFARI_WIDTH} ${SAFARI_HEIGHT}`}
         fill="none"
         xmlns="http://www.w3.org/2000/svg"

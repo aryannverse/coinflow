@@ -1,4 +1,4 @@
-// Source: React Bits ScrollReveal-TS-TW (reactbits.dev registry)
+// Source: React Bits ScrollReveal-TS-TW (reactbits.dev registry) (adapted: id prop; cleanup reverts only its own gsap.context, not every ScrollTrigger on the page)
 'use client';
 
 import React, { useEffect, useRef, useMemo, type ReactNode, type RefObject } from 'react';
@@ -18,6 +18,7 @@ interface ScrollRevealProps {
   textClassName?: string;
   rotationEnd?: string;
   wordAnimationEnd?: string;
+  id?: string;
 }
 
 const ScrollReveal: React.FC<ScrollRevealProps> = ({
@@ -30,7 +31,8 @@ const ScrollReveal: React.FC<ScrollRevealProps> = ({
   containerClassName = '',
   textClassName = '',
   rotationEnd = 'bottom bottom',
-  wordAnimationEnd = 'bottom bottom'
+  wordAnimationEnd = 'bottom bottom',
+  id
 }) => {
   const containerRef = useRef<HTMLHeadingElement>(null);
 
@@ -52,6 +54,7 @@ const ScrollReveal: React.FC<ScrollRevealProps> = ({
 
     const scroller = scrollContainerRef && scrollContainerRef.current ? scrollContainerRef.current : window;
 
+    const ctx = gsap.context(() => {
     gsap.fromTo(
       el,
       { transformOrigin: '0% 50%', rotate: baseRotation },
@@ -106,13 +109,13 @@ const ScrollReveal: React.FC<ScrollRevealProps> = ({
       );
     }
 
-    return () => {
-      ScrollTrigger.getAll().forEach(trigger => trigger.kill());
-    };
+    }, el);
+
+    return () => ctx.revert();
   }, [scrollContainerRef, enableBlur, baseRotation, baseOpacity, rotationEnd, wordAnimationEnd, blurStrength]);
 
   return (
-    <h2 ref={containerRef} className={`my-5 ${containerClassName}`}>
+    <h2 ref={containerRef} id={id} className={`my-5 ${containerClassName}`}>
       <p className={`text-[clamp(1.6rem,4vw,3rem)] leading-[1.5] font-semibold ${textClassName}`}>{splitText}</p>
     </h2>
   );

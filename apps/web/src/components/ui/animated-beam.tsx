@@ -1,4 +1,4 @@
-// Source: Magic UI animated-beam
+// Source: Magic UI animated-beam (adapted: svg is aria-hidden)
 "use client"
 
 import { useEffect, useId, useState, type RefObject } from "react"
@@ -126,6 +126,7 @@ export const AnimatedBeam: React.FC<AnimatedBeamProps> = ({
 
   return (
     <svg
+      aria-hidden
       fill="none"
       width={svgDimensions.width}
       height={svgDimensions.height}
