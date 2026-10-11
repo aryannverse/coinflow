@@ -41,7 +41,7 @@
 / (repo root)
 ├─ package.json                 workspace root scripts
 ├─ pnpm-workspace.yaml
-├─ docker-compose.yml           postgres:16-alpine on host port 5433
+├─ docker-compose.yml           postgres:16-alpine on host port 5436
 ├─ .gitignore                   (modified: node_modules, .next, uploads, test output)
 └─ apps/web/
    ├─ package.json, tsconfig.json, next.config.ts, eslint.config.mjs, postcss.config.mjs   (create-next-app)
@@ -82,7 +82,7 @@ Responsibilities: `lib/*` = pure functions + zod schemas (no DB, no Next imports
 - Modify: `.gitignore`
 
 **Interfaces:**
-- Produces: `pnpm dev|build|verify|db:*` root scripts delegating to `apps/web`; Postgres reachable at `postgres://coinflow:coinflow@localhost:5433/coinflow`.
+- Produces: `pnpm dev|build|verify|db:*` root scripts delegating to `apps/web`; Postgres reachable at `postgres://coinflow:coinflow@localhost:5436/coinflow`.
 
 - [ ] **Step 1: Delete the old project files**
 
@@ -142,7 +142,7 @@ services:
       POSTGRES_PASSWORD: coinflow
       POSTGRES_DB: coinflow
     ports:
-      - "5433:5432"
+      - "5436:5432"
     volumes:
       - coinflow_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -187,8 +187,8 @@ cd ../..
 
 `apps/web/.env.example`:
 ```bash
-# Postgres (docker compose, host port 5433)
-DATABASE_URL=postgres://coinflow:coinflow@localhost:5433/coinflow
+# Postgres (docker compose, host port 5436)
+DATABASE_URL=postgres://coinflow:coinflow@localhost:5436/coinflow
 
 # Clerk — written into .env.local by `npx clerk init` (Task 2). Never commit real values.
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=

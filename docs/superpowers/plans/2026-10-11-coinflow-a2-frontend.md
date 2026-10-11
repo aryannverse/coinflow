@@ -1819,7 +1819,7 @@ Create placeholder pages so navigation works (each replaced by later tasks): `sr
 - [ ] **Step 6: Verify and commit**
 
 Run: `pnpm --filter web test && pnpm --filter web typecheck && pnpm --filter web build` → PASS.
-Manual: `pnpm dev`, sign in. Because `onboardedAt` is null you land on `/onboarding` (404 until Task 21) — temporarily run `psql postgres://coinflow:coinflow@localhost:5433/coinflow -c "update users set onboarded_at = now()"`, then confirm: sidebar on desktop, bottom tabs at 390 px width, ⌘K opens the palette, typing "250 food" shows "Add expense ₹250 · 🍜 Food & Dining".
+Manual: `pnpm dev`, sign in. Because `onboardedAt` is null you land on `/onboarding` (404 until Task 21) — temporarily run `psql postgres://coinflow:coinflow@localhost:5436/coinflow -c "update users set onboarded_at = now()"`, then confirm: sidebar on desktop, bottom tabs at 390 px width, ⌘K opens the palette, typing "250 food" shows "Add expense ₹250 · 🍜 Food & Dining".
 ```bash
 git add apps/web
 git commit -m "feat(shell): guarded app layout, sidebar/tabs, Ask Coinflow pill and command palette
