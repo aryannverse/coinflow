@@ -1,0 +1,21 @@
+INSERT INTO categories (user_id, name, emoji, color, kind, sort) VALUES
+  (NULL, 'Food & Dining',     '🍜', '#C8F560', 'expense', 10),
+  (NULL, 'Groceries',         '🛒', '#8FD694', 'expense', 20),
+  (NULL, 'Transport',         '🚕', '#F5D76E', 'expense', 30),
+  (NULL, 'Shopping',          '🛍️', '#F2A2C0', 'expense', 40),
+  (NULL, 'Bills & Utilities', '💡', '#7FC8F8', 'expense', 50),
+  (NULL, 'Rent',              '🏠', '#B79CED', 'expense', 60),
+  (NULL, 'Entertainment',     '🎬', '#FF9F80', 'expense', 70),
+  (NULL, 'Health',            '💊', '#6EE7B7', 'expense', 80),
+  (NULL, 'Education',         '📚', '#93C5FD', 'expense', 90),
+  (NULL, 'Travel',            '✈️', '#FCD34D', 'expense', 100),
+  (NULL, 'Personal Care',     '💇', '#F9A8D4', 'expense', 110),
+  (NULL, 'Gifts',             '🎁', '#FDBA74', 'expense', 120),
+  (NULL, 'Subscriptions',     '🔁', '#A5B4FC', 'expense', 130),
+  (NULL, 'Other',             '•',  '#9BA59F', 'expense', 999),
+  (NULL, 'Salary',            '💼', '#C8F560', 'income', 10),
+  (NULL, 'Allowance',         '🪙', '#F5D76E', 'income', 20),
+  (NULL, 'Freelance',         '🧑‍💻', '#7FC8F8', 'income', 30),
+  (NULL, 'Refund',            '↩️', '#8FD694', 'income', 40),
+  (NULL, 'Other',             '•',  '#9BA59F', 'income', 999)
+ON CONFLICT ON CONSTRAINT categories_owner_name_kind DO NOTHING;

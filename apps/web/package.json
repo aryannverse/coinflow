@@ -7,24 +7,33 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test": "vitest run --config vitest.config.mts",
+    "typecheck": "tsc --noEmit",
+    "test:int": "vitest run --config vitest.int.config.mts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.14",
+    "drizzle-orm": "^0.45.4",
     "next": "16.4.0",
+    "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@next/env": "16.4.0",
     "@tailwindcss/turbopack": "^4",
+    "@testcontainers/postgresql": "^12.2.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "vitest": "^5.0.3"
   },
