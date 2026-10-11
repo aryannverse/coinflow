@@ -28,7 +28,7 @@ export function DoneStep({ name, celebrate }: { name: string; celebrate: boolean
       ) : view?.headline != null ? (
         <>
           <p className="flex flex-wrap items-baseline justify-center gap-x-2">
-            <AmountTicker paise={view.headline} className={view.tone === 'neutral-negative' ? 'text-4xl font-bold text-neutral-negative min-[360px]:text-5xl sm:text-6xl' : 'text-4xl font-bold text-primary min-[360px]:text-5xl sm:text-6xl'} />
+            <AmountTicker paise={view.headline} from="value" className={view.tone === 'neutral-negative' ? 'text-4xl font-bold text-neutral-negative min-[360px]:text-5xl sm:text-6xl' : 'text-4xl font-bold text-primary min-[360px]:text-5xl sm:text-6xl'} />
             {view.suffix && <span className="text-lg text-muted-foreground">{view.suffix}</span>}
           </p>
           <p className="text-muted-foreground">{view.line}</p>

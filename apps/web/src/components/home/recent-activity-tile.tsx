@@ -35,10 +35,11 @@ export function RecentActivityTile({ initial }: { initial: TransactionDTO[] }) {
   return (
     <Tile aria-labelledby="recent-title" className="h-full">
       <div className="flex items-center justify-between">
-        <TileHeading id="recent-title">Recent</TileHeading>
+        {/* Focusable from script: it catches focus after the last waiting draft is confirmed or skipped. */}
+        <TileHeading id="recent-title" tabIndex={-1}>Recent</TileHeading>
         <Link
           href="/activity"
-          className="-mr-2 flex min-h-12 min-w-12 items-center justify-center rounded-chip px-2 text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/60 active:scale-[0.97]"
+          className="-mr-2 flex min-h-12 min-w-12 items-center justify-center rounded-chip px-2 text-sm text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-[3px] focus-visible:ring-ring active:scale-[0.97]"
         >
           See all
         </Link>

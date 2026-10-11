@@ -31,7 +31,7 @@ export function SafeToSpendTile({ initial, today }: { initial: SafeToSpendDTO; t
       ) : (
         <>
           <p className="mt-2 flex flex-wrap items-baseline gap-x-3">
-            <AmountTicker paise={view.headline} className="block text-4xl font-bold min-[360px]:text-5xl sm:text-6xl lg:text-7xl" />
+            <AmountTicker paise={view.headline} from="value" className="block text-4xl font-bold min-[360px]:text-5xl sm:text-6xl lg:text-7xl" />
             {view.suffix && <span className="font-display text-xl font-medium">{view.suffix}</span>}
           </p>
           <p className={cn('mt-2 text-sm', view.tone === 'neutral-negative' ? 'font-medium' : 'text-[#0F1210]/80')}>{view.line}</p>

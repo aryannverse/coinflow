@@ -14,7 +14,7 @@ export function TodayTile({ today, initial }: { today: string; initial: Transact
   return (
     <Tile aria-labelledby="today-title" className="h-full">
       <TileHeading id="today-title">Today</TileHeading>
-      <AmountTicker paise={s.total} className="mt-2 block text-3xl font-bold" />
+      <AmountTicker paise={s.total} from="value" className="mt-2 block text-3xl font-bold" />
       <p className="mt-1 truncate text-sm text-muted-foreground">
         {s.count === 0 ? 'Nothing spent yet today' : `${s.count} spend${s.count > 1 ? 's' : ''} · last: ${lastName}`}
       </p>

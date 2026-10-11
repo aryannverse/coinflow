@@ -33,7 +33,8 @@ export function HomeGrid({ today, sts, recent, recurring, drafts, insights }: Pr
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <h1 className="sr-only">Home</h1>
-      <Reveal className="sm:col-span-2 lg:row-span-2"><SafeToSpendTile initial={sts} today={today} /></Reveal>
+      {/* The hero is the LCP element: a plain cell, so the server HTML paints the real number before any JS runs. */}
+      <div className="sm:col-span-2 lg:row-span-2"><SafeToSpendTile initial={sts} today={today} /></div>
       <Reveal delay={0.04}><TodayTile today={today} initial={recent} /></Reveal>
       <Reveal delay={0.08}><UpcomingBillsTile today={today} cycleEnd={sts.cycleEnd} initial={recurring} /></Reveal>
       <Reveal delay={0.12} className="sm:col-span-2 empty:hidden">

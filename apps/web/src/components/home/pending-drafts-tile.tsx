@@ -1,4 +1,5 @@
 'use client'
+import { useEffect, useRef } from 'react'
 import { useMotionReady, useReducedMotion } from '@/components/providers/motion-pref'
 import { BorderBeam } from '@/components/ui/border-beam'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,26 @@ export function PendingDraftsTile({ initial }: { initial?: TransactionDTO[] }) {
   const quick = useQuickAdd()
   const reduced = useReducedMotion()
   const showBeam = useMotionReady() && !reduced
+
+  // A confirmed or skipped row leaves once the list refetches. Focus must not fall to <body>: it goes to the
+  // next row's Confirm, else the Recent heading, else <main>.
+  const afterAction = useRef<{ removed: string; next?: string } | null>(null)
+  useEffect(() => {
+    const pending = afterAction.current
+    if (!pending || drafts.some((d) => d.id === pending.removed)) return
+    afterAction.current = null
+    const next = pending.next ? document.querySelector<HTMLElement>(`[data-draft-id="${pending.next}"] [data-action="confirm"]`) : null
+    ;(next ?? document.getElementById('recent-title') ?? document.getElementById('main'))?.focus()
+  }, [drafts])
+
+  function act(kind: 'confirm' | 'skip', d: TransactionDTO, name: string) {
+    const i = drafts.findIndex((x) => x.id === d.id)
+    afterAction.current = { removed: d.id, next: drafts[i + 1]?.id }
+    const clear = { onError: () => { afterAction.current = null } }
+    if (kind === 'confirm') confirm.mutate({ id: d.id, name }, clear)
+    else skip.mutate({ id: d.id, name }, clear)
+  }
+
   if (drafts.length === 0) return null
   return (
     <section aria-labelledby="drafts-title" className="relative overflow-hidden rounded-tile border bg-card p-5">
@@ -27,15 +48,17 @@ export function PendingDraftsTile({ initial }: { initial?: TransactionDTO[] }) {
           const confirming = confirm.isPending && confirm.variables?.id === d.id
           const skipping = skip.isPending && skip.variables?.id === d.id
           return (
-            <li key={d.id} className="flex flex-wrap items-center gap-2 rounded-chip bg-surface-2 p-2">
+            <li key={d.id} data-draft-id={d.id} className="flex flex-wrap items-center gap-2 rounded-chip bg-surface-2 p-2">
               <span aria-hidden>{d.category.emoji}</span>
               <span className="min-w-0 flex-1 text-sm">{name} · <span className="amount">{formatINR(d.amount)}</span></span>
               <div className="flex items-center gap-1">
+                {/* aria-disabled, not disabled, while busy: a disabled button drops keyboard focus to <body>. */}
                 <Button
                   size="sm"
-                  className="min-h-12 min-w-12 active:scale-[0.97]"
-                  disabled={confirming || skipping}
-                  onClick={() => confirm.mutate({ id: d.id, name })}
+                  data-action="confirm"
+                  className="min-h-12 min-w-12 active:scale-[0.97] aria-disabled:opacity-50"
+                  aria-disabled={confirming || skipping || undefined}
+                  onClick={() => { if (!confirming && !skipping) act('confirm', d, name) }}
                 >
                   {confirming ? 'Confirming…' : 'Confirm'}<span className="sr-only"> {name}</span>
                 </Button>
@@ -60,9 +83,9 @@ export function PendingDraftsTile({ initial }: { initial?: TransactionDTO[] }) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="min-h-12 min-w-12 active:scale-[0.97]"
-                  disabled={confirming || skipping}
-                  onClick={() => skip.mutate({ id: d.id, name })}
+                  className="min-h-12 min-w-12 active:scale-[0.97] aria-disabled:opacity-50"
+                  aria-disabled={confirming || skipping || undefined}
+                  onClick={() => { if (!confirming && !skipping) act('skip', d, name) }}
                 >
                   {skipping ? 'Skipping…' : 'Skip'}<span className="sr-only"> {name}</span>
                 </Button>
