@@ -1,7 +1,8 @@
 // Source: React Bits ElasticSlider-TS-TW (reactbits.dev registry)
 // (adapted: controlled value/onValueChange, role=slider + aria-value* + keyboard via sliderKeyStep,
 //  theme tokens instead of fixed greys, min-h-12 touch target, `elastic` flag to drop the overflow/scale
-//  physics under reduced motion, removed the floating numeric label and the defaultValue state)
+//  physics under reduced motion, removed the floating numeric label and the defaultValue state, removed the 0.7 resting opacity, added a 24px thumb
+//  with a foreground border, and an unfilled `bg-track` token that is >= 3:1 against --card in both themes)
 'use client'
 
 import React, { useRef, useState } from 'react'
@@ -88,7 +89,6 @@ const ElasticSlider: React.FC<ElasticSliderProps> = ({
   })
   const trackHeight = useTransform(scale, [1, 1.2], [6, 12])
   const trackMargin = useTransform(scale, [1, 1.2], [0, -3])
-  const opacity = useTransform(scale, [1, 1.2], [0.7, 1])
   const leftX = useTransform(() => (region === 'left' ? -overflow.get() / scale.get() : 0))
   const rightX = useTransform(() => (region === 'right' ? overflow.get() / scale.get() : 0))
 
@@ -106,7 +106,7 @@ const ElasticSlider: React.FC<ElasticSliderProps> = ({
         onHoverEnd={shrink}
         onTouchStart={grow}
         onTouchEnd={shrink}
-        style={elastic ? { scale, opacity } : undefined}
+        style={elastic ? { scale } : undefined}
         className="flex w-full touch-none select-none items-center justify-center gap-4"
       >
         <motion.div
@@ -118,7 +118,6 @@ const ElasticSlider: React.FC<ElasticSliderProps> = ({
         </motion.div>
 
         <div
-          ref={sliderRef}
           role="slider"
           tabIndex={0}
           aria-label={label}
@@ -126,7 +125,7 @@ const ElasticSlider: React.FC<ElasticSliderProps> = ({
           aria-valuemax={max}
           aria-valuenow={value}
           aria-valuetext={valueText(value)}
-          className="relative flex min-h-12 w-full flex-grow cursor-grab touch-none select-none items-center rounded-full py-4 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="relative flex min-h-12 w-full flex-grow cursor-grab touch-none select-none items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onPointerDown={(e) => {
             fromPointer(e)
             e.currentTarget.setPointerCapture(e.pointerId)
@@ -144,18 +143,25 @@ const ElasticSlider: React.FC<ElasticSliderProps> = ({
             onValueChange(next)
           }}
         >
-          <motion.div
-            style={
-              elastic
-                ? { scaleX, scaleY, transformOrigin, height: trackHeight, marginTop: trackMargin, marginBottom: trackMargin }
-                : { height: 8 }
-            }
-            className="flex flex-grow"
-          >
-            <div className="relative h-full flex-grow overflow-hidden rounded-full bg-surface-2">
-              <div className="absolute h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-            </div>
-          </motion.div>
+          <div ref={sliderRef} className="relative mx-3 flex flex-grow items-center py-4">
+            <motion.div
+              style={
+                elastic
+                  ? { scaleX, scaleY, transformOrigin, height: trackHeight, marginTop: trackMargin, marginBottom: trackMargin }
+                  : { height: 8 }
+              }
+              className="flex flex-grow"
+            >
+              <div className="relative h-full flex-grow overflow-hidden rounded-full bg-track">
+                <div className="absolute h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+              </div>
+            </motion.div>
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-foreground bg-card shadow-sm"
+              style={{ left: `${pct}%` }}
+            />
+          </div>
         </div>
 
         <motion.div
