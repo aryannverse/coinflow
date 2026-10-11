@@ -8,7 +8,7 @@ import { logger } from './logger'
 type Ctx<P> = { req: Request; user: User; params: P; requestId: string }
 
 export function toErrorResponse(err: unknown, requestId: string): Response {
-  const headers = { 'x-request-id': requestId }
+  const headers = { 'x-request-id': requestId, 'cache-control': 'no-store' }
   if (err instanceof AppError) {
     const error = { code: err.code, message: err.message, ...(err.field ? { field: err.field } : {}) }
     return Response.json({ error, requestId }, { status: err.status, headers })
@@ -38,8 +38,14 @@ export function route<P extends Record<string, string | string[]> = Record<strin
       const user = await requireCurrentUser()
       const params = (segment ? await segment.params : {}) as P
       const result = await fn({ req, user, params, requestId })
-      if (result instanceof Response) return result
-      return Response.json(result ?? { ok: true }, { status: opts.status ?? 200, headers: { 'x-request-id': requestId } })
+      if (result instanceof Response) {
+        result.headers.set('x-request-id', requestId)
+        return result
+      }
+      return Response.json(result ?? { ok: true }, {
+        status: opts.status ?? 200,
+        headers: { 'x-request-id': requestId, 'cache-control': 'no-store' },
+      })
     } catch (err) {
       return toErrorResponse(err, requestId)
     }

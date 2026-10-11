@@ -7,6 +7,7 @@ describe('toErrorResponse', () => {
   it('maps AppError to its status and shape', async () => {
     const res = toErrorResponse(new AppError('invalid', 'Pick a category.', 422, 'categoryId'), 'r1')
     expect(res.status).toBe(422)
+    expect(res.headers.get('cache-control')).toBe('no-store')
     expect(await res.json()).toEqual({ error: { code: 'invalid', message: 'Pick a category.', field: 'categoryId' }, requestId: 'r1' })
   })
 

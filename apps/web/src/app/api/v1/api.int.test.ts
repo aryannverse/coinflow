@@ -243,7 +243,7 @@ describe('/api/v1', () => {
     const other = await files.GET(new Request(url('/files/qr/user_b/x.png')), params({ key: ['qr', 'user_b', 'x.png'] }))
     expect(other.status).toBe(404)
     const traversal = await files.GET(new Request(url('/files/x')), params({ key: ['qr', 'user_a', '..', '..', 'secret'] }))
-    expect([400, 404]).toContain(traversal.status)
+    expect(traversal.status).toBe(400)
     const missing = await files.GET(new Request(url('/files/x')), params({ key: ['qr', 'user_a', 'nope.png'] }))
     expect(missing.status).toBe(404)
   })
@@ -258,6 +258,8 @@ describe('/api/v1', () => {
     const first = (await (await send(PNG)).json()).data.upiQrUrl as string
     const second = (await (await send(PNG)).json()).data.upiQrUrl as string
     expect(second).not.toBe(first)
+    const newKey = second.replace('/api/v1/files/', '')
+    expect((await files.GET(new Request(url(`/files/${newKey}`)), params({ key: newKey.split('/') }))).status).toBe(200)
     const oldKey = first.replace('/api/v1/files/', '')
     expect((await files.GET(new Request(url(`/files/${oldKey}`)), params({ key: oldKey.split('/') }))).status).toBe(404)
 
@@ -265,7 +267,58 @@ describe('/api/v1', () => {
     big.set(PNG)
     expect((await send(big)).status).toBe(422)
 
+    // a declared body length far over the cap is rejected before the body is buffered
+    const form = new FormData()
+    form.set('file', new File([PNG as BlobPart], 'qr.png', { type: 'image/png' }))
+    const declared = await upiQr.POST(new Request(url('/me/upi-qr'), { method: 'POST', body: form, headers: { 'content-length': String(10 * 1024 * 1024) } }))
+    expect(declared.status).toBe(422)
+    expect((await declared.json()).error.message).toContain('2 MB')
+
     const cleared = await upiQr.DELETE(new Request(url('/me/upi-qr'), { method: 'DELETE' }))
     expect((await cleared.json()).data.upiQrUrl).toBeNull()
+    const newest = second.replace('/api/v1/files/', '')
+    expect((await files.GET(new Request(url(`/files/${newest}`)), params({ key: newest.split('/') }))).status).toBe(404)
+  })
+
+  it('user B cannot delete, skip, patch or budget against user A’s records', async () => {
+    await me.GET(new Request(url('/me')))
+    const { data: txnA } = await (await txns.POST(new Request(url('/transactions'), json('POST', { type: 'expense', amount: 1000, categoryId: foodId })))).json()
+    const draftId = (await createTransaction('user_a', { type: 'expense', amount: 2000, categoryId: foodId, method: 'upi', occurredAt: new Date() }, { status: 'draft' })).data.id
+    const { data: recA } = await (await recurring.POST(new Request(url('/recurring'), json('POST', {
+      kind: 'bill', name: 'Rent', amount: 1_200_000, categoryId: foodId, cadence: 'monthly', nextDueOn: '2030-01-05',
+    })))).json()
+    const { data: custom } = await (await categories.POST(new Request(url('/categories'), json('POST', { name: 'Pets', kind: 'expense', emoji: '🐶', color: '#aabbcc' })))).json()
+    await budget.PUT(new Request(url(`/budgets/${custom.id}`), json('PUT', { monthlyLimit: 300_000 })), params({ categoryId: custom.id }))
+
+    as('user_b')
+    await me.GET(new Request(url('/me')))
+    expect((await txn.DELETE(new Request(url(`/transactions/${txnA.id}`), { method: 'DELETE' }), params({ id: txnA.id }))).status).toBe(404)
+    expect((await skip.POST(new Request(url(`/transactions/${draftId}/skip`), { method: 'POST' }), params({ id: draftId }))).status).toBe(404)
+    expect((await recurringItem.PATCH(new Request(url(`/recurring/${recA.id}`), json('PATCH', { name: 'Hacked' })), params({ id: recA.id }))).status).toBe(404)
+    const put = await budget.PUT(new Request(url(`/budgets/${custom.id}`), json('PUT', { monthlyLimit: 1 })), params({ categoryId: custom.id }))
+    expect(put.status).toBe(422)
+    expect((await put.json()).error.field).toBe('categoryId')
+    expect((await budget.DELETE(new Request(url(`/budgets/${custom.id}`), { method: 'DELETE' }), params({ categoryId: custom.id }))).status).toBe(404)
+
+    as('user_a')
+    expect((await (await txns.GET(new Request(url('/transactions')))).json()).data).toHaveLength(1)
+    expect((await (await recurring.GET(new Request(url('/recurring')))).json()).data[0].name).toBe('Rent')
+    const mine = (await (await budgets.GET(new Request(url('/budgets')))).json()).data
+    expect(mine).toHaveLength(1)
+    expect(mine[0].monthlyLimit).toBe(300_000)
+    const drafts = await (await txns.GET(new Request(url('/transactions?status=draft')))).json()
+    expect(drafts.data).toHaveLength(1)
+  })
+
+  it('sets no-store and x-request-id on JSON, error and CSV responses', async () => {
+    const signedOut = (as(null), await me.GET(new Request(url('/me'))))
+    expect(signedOut.headers.get('cache-control')).toBe('no-store')
+    expect(signedOut.headers.get('x-request-id')).toEqual(expect.any(String))
+    as('user_a')
+    const ok = await me.GET(new Request(url('/me')))
+    expect(ok.headers.get('cache-control')).toBe('no-store')
+    const csv = await exportCsv.GET(new Request(url('/export.csv')))
+    expect(csv.headers.get('cache-control')).toBe('no-store')
+    expect(csv.headers.get('x-request-id')).toEqual(expect.any(String))
   })
 })
