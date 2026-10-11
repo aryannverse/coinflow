@@ -82,7 +82,8 @@ function useLedgerMutation<TVars, TRes extends Mutation>(
       if (isSignedOut(err)) return
       toast.error(err instanceof ApiError ? err.message : 'Something went wrong.', {
         description: err instanceof ApiError && err.requestId ? `Ref ${err.requestId}` : undefined,
-        action: { label: 'Retry', onClick: () => mutation.mutate(vars) },
+        // A still-saving temp id can never succeed on retry, so that message stands alone.
+        action: err instanceof ApiError && err.code === 'still_saving' ? undefined : { label: 'Retry', onClick: () => mutation.mutate(vars) },
       })
     },
     // Optimistic edits are always reconciled with the server, success or not.

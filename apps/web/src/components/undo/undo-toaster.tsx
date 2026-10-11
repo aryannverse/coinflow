@@ -48,10 +48,15 @@ export function UndoToaster() {
             variant="secondary" className="min-h-12 min-w-12 px-4 active:scale-[0.97]"
             onClick={() => {
               // The toast can outlive the store window (sonner pauses on hover/hidden tab), so undo its OWN entry.
-              const target = resolveUndoTarget(undoStore.current(), entry, fired)
+              const target = resolveUndoTarget(undoStore.current(), entry, {
+                fired, consumed: undoStore.isConsumed(entry.auditId),
+              })
               fired = true
               if (target.clearStore) undoStore.clear(entry.auditId)
-              if (target.auditId) undoMutate(target.auditId)
+              if (target.auditId) {
+                undoStore.markConsumed(target.auditId)
+                undoMutate(target.auditId)
+              }
               toast.dismiss(t)
             }}
           >
