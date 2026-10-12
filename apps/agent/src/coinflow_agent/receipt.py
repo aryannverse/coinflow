@@ -59,11 +59,21 @@ class ReceiptResult(BaseModel):
     mismatchPaise: int  # printed total − (items + tax + tip − discount)
 
 
-def _money(text: str | None) -> int:
-    if not text:
+_ZERO = re.compile(r"₹?\s*0+(?:\.0{1,2})?")
+LOW_CONFIDENCE = 0.5  # below the web app's 0.6 "check the numbers" line
+
+
+def _signed(text: str | None) -> int | None:
+    """'₹1,240.00' → 124000, '-20' → -2000, blank or zero → 0, anything unreadable → None."""
+    if text is None or not text.strip():
         return 0
-    cleaned = re.sub(r"(?i)\b(rs\.?|inr)\b", "", text).strip().lstrip("-−").strip()
-    return parse_rupees_to_paise(cleaned) or 0
+    cleaned = re.sub(r"(?i)\b(rs\.?|inr)\b", "", text).strip()
+    sign = -1 if cleaned[:1] in ("-", "−") else 1
+    cleaned = cleaned.lstrip("-−").strip()
+    if _ZERO.fullmatch(cleaned):
+        return 0
+    paise = parse_rupees_to_paise(cleaned)
+    return None if paise is None else sign * paise
 
 
 def _iso(day: str | None) -> str | None:
@@ -77,12 +87,40 @@ def _iso(day: str | None) -> str | None:
 
 
 def normalize_receipt(raw: RawReceipt) -> ReceiptResult:
-    items = [ReceiptItem(name=(i.name.strip() or "Item")[:60], amountPaise=p) for i in raw.items if (p := _money(i.amount)) > 0][
-        :100
-    ]
-    tax, tip, discount = _money(raw.tax), _money(raw.tip), _money(raw.discount)
+    """Never silently fixed: a negative line is money off (discount), and anything unreadable (a line, a field or the
+    total) caps confidence below 0.6, so the app asks the user to check the numbers."""
+    unreadable = False
+    items: list[ReceiptItem] = []
+    line_discounts = 0
+    for line in raw.items:
+        paise = _signed(line.amount)
+        if paise is None:
+            unreadable = True
+        elif paise < 0:
+            line_discounts += -paise
+        elif paise > 0:
+            items.append(ReceiptItem(name=(line.name.strip() or "Item")[:60], amountPaise=paise))
+    if len(items) > 100:
+        items, unreadable = items[:100], True
+
+    def field(text: str | None) -> int:  # the field says which way it goes; printed signs vary ("-10" discount)
+        nonlocal unreadable
+        paise = _signed(text)
+        if paise is None:
+            unreadable = True
+            return 0
+        return abs(paise)
+
+    tax, tip = field(raw.tax), field(raw.tip)
+    discount = field(raw.discount) + line_discounts
     computed = sum(i.amountPaise for i in items) + tax + tip - discount
-    total = _money(raw.total) or computed
+    printed = _signed(raw.total)
+    if not printed or printed < 0:  # missing or unreadable: show the computed sum, but don't vouch for it
+        unreadable = True
+        total = computed
+    else:
+        total = printed
+    confidence = min(1.0, max(0.0, raw.confidence))
     return ReceiptResult(
         merchant=(raw.merchant or "").strip()[:80] or None,
         date=_iso(raw.date),
@@ -91,7 +129,7 @@ def normalize_receipt(raw: RawReceipt) -> ReceiptResult:
         tipPaise=tip,
         discountPaise=discount,
         totalPaise=total,
-        confidence=min(1.0, max(0.0, raw.confidence)),
+        confidence=min(confidence, LOW_CONFIDENCE) if unreadable else confidence,
         mismatch=computed != total,
         mismatchPaise=total - computed,
     )

@@ -36,20 +36,50 @@ def test_a_mismatch_is_flagged_for_the_user_not_fixed():
     assert (r.totalPaise, r.mismatch, r.mismatchPaise) == (21_000, True, 947)
 
 
-def test_unreadable_lines_dates_and_confidence_are_cleaned():
+def test_dates_and_confidence_are_cleaned():
+    r = normalize_receipt(raw(date="12/10/2026", confidence=1.7))
+    assert r.date is None and r.confidence == 1.0
+
+
+# Deliberate change (final review): this used to drop "abc" quietly and take the items as the total when none was
+# printed, so the "check the numbers" notice never showed. Now anything unreadable caps confidence below 0.6.
+def test_an_unreadable_line_is_never_dropped_silently():
     r = normalize_receipt(
         raw(
             items=[RawItem(name="Chai", amount="abc"), RawItem(name="  ", amount="₹1,240.00")],
-            date="12/10/2026",
-            confidence=1.7,
-            total="",
+            total="1240",
             tax=None,
             discount=None,
         )
     )
     assert [i.model_dump() for i in r.items] == [{"name": "Item", "amountPaise": 124_000}]
-    assert r.date is None and r.confidence == 1.0
-    assert r.totalPaise == 124_000 and not r.mismatch  # no printed total → the items are the total
+    assert not r.mismatch and r.confidence < 0.6  # the sum happens to match, but a line is missing: ask the user to check
+
+
+def test_an_unreadable_total_is_flagged_not_assumed():
+    for total in ("", "see above"):
+        r = normalize_receipt(raw(items=[RawItem(name="Thali", amount="240")], total=total, tax=None, discount=None))
+        assert r.totalPaise == 24_000 and r.confidence < 0.6
+
+
+def test_negative_lines_are_discounts_not_charges():
+    # "Happy hour −₹20" is money off: it must never be added to the bill as +₹20.
+    r = normalize_receipt(
+        raw(
+            items=[RawItem(name="Pizza", amount="120"), RawItem(name="Happy hour", amount="-20.00")],
+            tax=None,
+            discount=None,
+            total="100",
+        )
+    )
+    assert [i.name for i in r.items] == ["Pizza"]
+    assert (r.discountPaise, r.totalPaise, r.mismatch, r.confidence) == (2_000, 10_000, False, 0.9)
+    both = normalize_receipt(
+        raw(
+            items=[RawItem(name="Pizza", amount="120"), RawItem(name="Promo", amount="−₹10")], tax=None, discount="5", total="105"
+        )
+    )
+    assert (both.discountPaise, both.mismatch) == (1_500, False)
 
 
 def test_receipt_text_is_only_ever_data():
