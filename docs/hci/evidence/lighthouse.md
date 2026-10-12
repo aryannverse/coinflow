@@ -33,3 +33,5 @@ Mobile `/home` LCP is 3.5 s in the typical run (4.5 s in the 82 run). Before the
 77-79; the change between the two is that the Safe-to-spend hero is now server-rendered with its real number and no entrance
 animation, so it paints without waiting for JavaScript. Runs are still under Clerk development keys. An earlier attempt the same
 morning, while another workload held the machine at a load average above 30, gave mobile 60-91; those runs are not used.
+The recorded runs above were taken with the machine still moderately loaded (load average about 10-14), so performance on
+an idle machine may be somewhat higher; treat these numbers as conservative but not controlled.
