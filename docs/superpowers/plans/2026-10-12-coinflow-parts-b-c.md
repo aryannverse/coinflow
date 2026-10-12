@@ -72,6 +72,7 @@
 - **Task 3 Python.** The code was extracted from this plan into a fresh uv project: **67 passed**, and ruff was clean after `--fix` and `format`.
   - The speech extra installed on macOS arm64.
   - `scripts/bench_speech.py` ran end to end once two fixes from this plan were in place: the `av==14.4.0` pin and the macOS espeak workaround.
+- **Friends additions not validated.** The Friends additions (spec §3.8: Task 1 Steps 2/4/11/13/15/18/22b, Task 2 Step 10b, Task 5 Steps 1/2b/4/5) were added afterwards and were NOT validated in a scratch copy; the counts above predate them.
 - **UI and E2E.** Components were typechecked and linted, but **not** run in a browser. The E2E specs were typechecked, but **not** run. Steps marked "smoke" and Task 5 are where they first execute.
 
 ## Global Constraints
@@ -216,7 +217,7 @@ apps/agent/   (uv project: src/coinflow_agent/**, tests/**, Dockerfile)        T
 docker-compose.yml (agent service, profile "agent")                            T3
 apps/web/
   src/server/internal-token.ts internal-http.ts agent-proxy.ts                 T4
-  src/server/services/coach-digest.ts                                          T4
+  src/server/services/coach.ts                                                 T4
   src/lib/sse.ts agent-chat.ts proposal-apply.ts schemas/proposals.ts          T4
   src/app/api/v1/agent/** ; src/app/api/internal/**                            T4
   src/components/agent/*                                                       T4
@@ -2553,6 +2554,162 @@ export async function announceClaim(tx: Tx, group: Group, member: GroupMember, a
 }
 ```
 
+Friends service (spec §3.8); `groups.ts` below imports it.
+
+`src/server/services/friends.ts`:
+
+```ts
+import 'server-only'
+import { and, desc, eq, or, sql } from 'drizzle-orm'
+import { pgErrorCode } from '@/server/db/errors'
+import { getDb, type Tx } from '@/server/db/client'
+import { friendships, notifications, users, type Friendship, type User } from '@/server/db/schema'
+import { AppError, conflict, invalid, notFound } from '@/server/errors'
+import type { Exec } from './groups/rows'
+import { notify, wake } from './notifications'
+
+export type FriendUser = { userId: string; name: string; email: string; avatarUrl: string | null }
+export type FriendRelation = 'self' | 'none' | 'friends' | 'outgoing' | 'incoming'
+export type FriendSearchResult = FriendUser & { relation: FriendRelation; requestId: string | null }
+export type FriendRequestView = FriendUser & { requestId: string; createdAt: Date }
+export type FriendView = FriendUser & { since: Date }
+export type FriendsOverview = { friends: FriendView[]; incoming: FriendRequestView[]; outgoing: FriendRequestView[] }
+
+/** The name Coinflow shows for an account: its profile name, else the part of the email before the @. */
+export const displayNameOf = (u: Pick<User, 'name' | 'email'>) => u.name.trim() || u.email.split('@')[0]
+export const notFriends = (field = 'userId') =>
+  new AppError('not_friends', 'You can only add friends directly. Share the invite link with anyone else.', 422, field)
+
+const view = (u: User): FriendUser => ({ userId: u.id, name: displayNameOf(u), email: u.email, avatarUrl: u.avatarUrl })
+const byEmail = (email: string) => sql`lower(${users.email}) = ${email.trim().toLowerCase()}`
+const pair = (a: string, b: string) => or(
+  and(eq(friendships.requesterId, a), eq(friendships.addresseeId, b)),
+  and(eq(friendships.requesterId, b), eq(friendships.addresseeId, a)),
+)
+const requestNote = (requestId: string) =>
+  and(eq(notifications.kind, 'friend_request'), sql`${notifications.payload}->>'requestId' = ${requestId}`)
+
+export async function areFriends(exec: Exec, a: string, b: string): Promise<boolean> {
+  const [row] = await exec.select({ id: friendships.id }).from(friendships).where(and(pair(a, b), eq(friendships.status, 'accepted')))
+  return Boolean(row)
+}
+
+/** Loads a user the caller is friends with, or refuses with not_friends (422). */
+export async function requireFriend(tx: Tx, userId: string, friendId: string, field = 'userId'): Promise<User> {
+  if (friendId === userId || !(await areFriends(tx, userId, friendId))) throw notFriends(field)
+  const [u] = await tx.select().from(users).where(eq(users.id, friendId))
+  if (!u) throw notFriends(field)
+  return u
+}
+
+/** Exact, case-insensitive email match only (spec §3.8): no partial matches, so accounts can't be enumerated. */
+export async function searchByEmail(userId: string, email: string): Promise<FriendSearchResult | null> {
+  const db = getDb()
+  const [u] = await db.select().from(users).where(byEmail(email))
+  if (!u) return null
+  if (u.id === userId) return { ...view(u), relation: 'self', requestId: null }
+  const [f] = await db.select().from(friendships).where(pair(userId, u.id))
+  const relation: FriendRelation = !f ? 'none' : f.status === 'accepted' ? 'friends' : f.requesterId === userId ? 'outgoing' : 'incoming'
+  return { ...view(u), relation, requestId: f?.id ?? null }
+}
+
+async function accept(tx: Tx, f: Friendship, accepter: User): Promise<void> {
+  await tx.update(friendships).set({ status: 'accepted', respondedAt: new Date() }).where(eq(friendships.id, f.id))
+  // Hide Accept / Decline on the addressee's notification. (A Date inside sql`` breaks postgres.js, hence now().)
+  const acted = await tx.update(notifications).set({ actedAt: new Date(), readAt: sql`coalesce(${notifications.readAt}, now())` })
+    .where(requestNote(f.id)).returning({ userId: notifications.userId })
+  await wake(tx, acted.map((r) => r.userId))
+  await notify(tx, [{
+    userId: f.requesterId, kind: 'friend_accepted', title: `${displayNameOf(accepter)} accepted your friend request`,
+    body: 'You can now add each other to groups directly.', href: '/friends', payload: { userId: accepter.id },
+  }])
+}
+
+export async function sendFriendRequest(
+  userId: string, email: string,
+): Promise<{ data: { requestId: string; status: 'pending' | 'accepted'; user: FriendUser } }> {
+  try {
+    return await getDb().transaction(async (tx) => {
+      const [target] = await tx.select().from(users).where(byEmail(email))
+      if (!target) throw invalid('email', 'No Coinflow account uses that email. Invite them with a group link instead.')
+      if (target.id === userId) throw invalid('email', 'That’s you.')
+      const [me] = await tx.select().from(users).where(eq(users.id, userId))
+      if (!me) throw notFound('account')
+      const [existing] = await tx.select().from(friendships).where(pair(userId, target.id)).for('update')
+      const name = displayNameOf(target)
+      if (existing?.status === 'accepted') throw conflict('already_friends', `You and ${name} are already friends.`)
+      if (existing?.requesterId === userId) throw conflict('friend_request_exists', `You’ve already asked ${name}. They haven’t answered yet.`)
+      if (existing) { // they asked first, so asking back is a yes (spec §3.8)
+        await accept(tx, existing, me)
+        return { data: { requestId: existing.id, status: 'accepted' as const, user: view(target) } }
+      }
+      const [row] = await tx.insert(friendships).values({ requesterId: userId, addresseeId: target.id }).returning()
+      await notify(tx, [{
+        userId: target.id, kind: 'friend_request', title: `${displayNameOf(me)} wants to be friends`,
+        body: 'Friends can add each other to groups without an invite link.', href: '/friends',
+        payload: { requestId: row.id, fromUserId: userId, fromName: displayNameOf(me) },
+      }])
+      return { data: { requestId: row.id, status: 'pending' as const, user: view(target) } }
+    })
+  } catch (err) {
+    // Two crossed requests at the same instant: the pair index lets one in; the other is told plainly.
+    if (pgErrorCode(err) === '23505') throw conflict('friend_request_exists', 'There’s already a request between you two.')
+    throw err
+  }
+}
+
+export async function acceptFriendRequest(userId: string, requestId: string): Promise<{ data: FriendView }> {
+  return getDb().transaction(async (tx) => {
+    const [f] = await tx.select().from(friendships)
+      .where(and(eq(friendships.id, requestId), eq(friendships.addresseeId, userId), eq(friendships.status, 'pending'))).for('update')
+    if (!f) throw notFound('friend request')
+    const [me] = await tx.select().from(users).where(eq(users.id, userId))
+    const [them] = await tx.select().from(users).where(eq(users.id, f.requesterId))
+    if (!me || !them) throw notFound('friend request')
+    await accept(tx, f, me)
+    return { data: { ...view(them), since: new Date() } }
+  })
+}
+
+/** Decline (addressee) or cancel (requester). Silent: the row and the actionable notification both go. */
+export async function dropFriendRequest(userId: string, requestId: string): Promise<{ data: { id: string } }> {
+  return getDb().transaction(async (tx) => {
+    const [f] = await tx.delete(friendships).where(and(
+      eq(friendships.id, requestId), eq(friendships.status, 'pending'),
+      or(eq(friendships.requesterId, userId), eq(friendships.addresseeId, userId)),
+    )).returning()
+    if (!f) throw notFound('friend request')
+    const gone = await tx.delete(notifications).where(requestNote(f.id)).returning({ userId: notifications.userId })
+    await wake(tx, gone.map((r) => r.userId))
+    return { data: { id: f.id } }
+  })
+}
+
+/** Either side may unfriend. Groups, expenses and balances they share are untouched (spec §3.8). */
+export async function unfriend(userId: string, friendUserId: string): Promise<{ data: { userId: string } }> {
+  const rows = await getDb().delete(friendships)
+    .where(and(pair(userId, friendUserId), eq(friendships.status, 'accepted'))).returning({ id: friendships.id })
+  if (rows.length === 0) throw notFound('friend')
+  return { data: { userId: friendUserId } }
+}
+
+export async function listFriends(userId: string): Promise<FriendsOverview> {
+  const rows = await getDb().select({ f: friendships, u: users }).from(friendships)
+    .innerJoin(users, sql`${users.id} = case when ${friendships.requesterId} = ${userId} then ${friendships.addresseeId} else ${friendships.requesterId} end`)
+    .where(or(eq(friendships.requesterId, userId), eq(friendships.addresseeId, userId)))
+    .orderBy(desc(friendships.createdAt))
+  const request = (r: (typeof rows)[number]): FriendRequestView => ({ ...view(r.u), requestId: r.f.id, createdAt: r.f.createdAt })
+  const pending = rows.filter((r) => r.f.status === 'pending')
+  return {
+    friends: rows.filter((r) => r.f.status === 'accepted')
+      .map((r) => ({ ...view(r.u), since: r.f.respondedAt ?? r.f.createdAt }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'en-IN')),
+    incoming: pending.filter((r) => r.f.addresseeId === userId).map(request),
+    outgoing: pending.filter((r) => r.f.requesterId === userId).map(request),
+  }
+}
+```
+
 `src/server/services/groups/groups.ts`:
 
 ```ts
@@ -2585,7 +2742,7 @@ export async function createGroup(userId: string, body: GroupCreateBody): Promis
     // Spec §3.8: friends join as claimed members at once; anyone else must be a placeholder.
     const friends: User[] = []
     for (const id of new Set(input.friendIds)) friends.push(await requireFriend(tx, userId, id, 'friendIds'))
-    const names = [...friends.map(displayNameOf), ...input.placeholders.map((p) => p.displayName)].map((n) => n.trim().toLowerCase())
+    const names = [displayNameOf(user), ...friends.map(displayNameOf), ...input.placeholders.map((p) => p.displayName)].map((n) => n.trim().toLowerCase())
     if (new Set(names).size !== names.length) throw invalid('placeholders', 'Two people have the same name — add an initial to one.')
     const [g] = await tx.insert(groups).values({
       createdBy: userId, name: input.name, emoji: input.emoji, color: input.color, kind: input.kind,
@@ -2600,7 +2757,7 @@ export async function createGroup(userId: string, body: GroupCreateBody): Promis
       ...input.placeholders.map((p, i) => ({ groupId: g.id, displayName: p.displayName, upiId: p.upiId ?? null, addedBy: userId, createdAt: at(friends.length + i + 1) })),
     ])
     await createInviteRow(tx, g.id, userId)
-    await recordActivity(tx, { groupId: g.id, actorUserId: userId, kind: 'group_created', summary: `${user.name || 'Someone'} created ${g.name}` })
+    await recordActivity(tx, { groupId: g.id, actorUserId: userId, kind: 'group_created', summary: `${displayNameOf(user)} created ${g.name}` })
     await notify(tx, friends.map((f) => ({
       userId: f.id, kind: 'group_added' as const, title: `${displayNameOf(user)} added you to ${g.name}`,
       body: 'You can see its expenses and your balance now.', href: `/groups/${g.id}`, payload: { groupId: g.id },
@@ -4221,163 +4378,9 @@ Common causes of a Part A regression:
 
 - [ ] **Step 22b: Friends — service, schemas, group hooks, routes, tests (spec §3.8)**
 
-This step was added at the user's request after the plan was written. The `friendships` table is already in Step 2's schema and the `0003` migration. `resetDb` already clears it (Step 4). The friend schemas come from Step 11. `createGroup` already accepts `friendIds` (Step 15). `announceClaim` is already shared by claim and link (Step 15). The undo rule for a friend add is already in Step 18.
+This step was added at the user's request after the plan was written. The `friendships` table is already in Step 2's schema and the `0003` migration. `resetDb` already clears it (Step 4). The friend schemas (`src/lib/schemas/friends.ts` and its test) came from Step 11 and `services/friends.ts` from Step 15. `createGroup` already accepts `friendIds` (Step 15). `announceClaim` is already shared by claim and link (Step 15). The undo rule for a friend add is already in Step 18.
 
-The friend schemas (`src/lib/schemas/friends.ts` and its test) were created in Step 11.
-
-`src/server/services/friends.ts`:
-
-```ts
-import 'server-only'
-import { and, desc, eq, or, sql } from 'drizzle-orm'
-import { pgErrorCode } from '@/server/db/errors'
-import { getDb, type Tx } from '@/server/db/client'
-import { friendships, notifications, users, type Friendship, type User } from '@/server/db/schema'
-import { AppError, conflict, invalid, notFound } from '@/server/errors'
-import type { Exec } from './groups/rows'
-import { notify, wake } from './notifications'
-
-export type FriendUser = { userId: string; name: string; email: string; avatarUrl: string | null }
-export type FriendRelation = 'self' | 'none' | 'friends' | 'outgoing' | 'incoming'
-export type FriendSearchResult = FriendUser & { relation: FriendRelation; requestId: string | null }
-export type FriendRequestView = FriendUser & { requestId: string; createdAt: Date }
-export type FriendView = FriendUser & { since: Date }
-export type FriendsOverview = { friends: FriendView[]; incoming: FriendRequestView[]; outgoing: FriendRequestView[] }
-
-/** The name Coinflow shows for an account: its profile name, else the part of the email before the @. */
-export const displayNameOf = (u: Pick<User, 'name' | 'email'>) => u.name.trim() || u.email.split('@')[0]
-export const notFriends = (field = 'userId') =>
-  new AppError('not_friends', 'You can only add friends directly. Share the invite link with anyone else.', 422, field)
-
-const view = (u: User): FriendUser => ({ userId: u.id, name: displayNameOf(u), email: u.email, avatarUrl: u.avatarUrl })
-const byEmail = (email: string) => sql`lower(${users.email}) = ${email.trim().toLowerCase()}`
-const pair = (a: string, b: string) => or(
-  and(eq(friendships.requesterId, a), eq(friendships.addresseeId, b)),
-  and(eq(friendships.requesterId, b), eq(friendships.addresseeId, a)),
-)
-const requestNote = (requestId: string) =>
-  and(eq(notifications.kind, 'friend_request'), sql`${notifications.payload}->>'requestId' = ${requestId}`)
-
-export async function areFriends(exec: Exec, a: string, b: string): Promise<boolean> {
-  const [row] = await exec.select({ id: friendships.id }).from(friendships).where(and(pair(a, b), eq(friendships.status, 'accepted')))
-  return Boolean(row)
-}
-
-/** Loads a user the caller is friends with, or refuses with not_friends (422). */
-export async function requireFriend(tx: Tx, userId: string, friendId: string, field = 'userId'): Promise<User> {
-  if (friendId === userId || !(await areFriends(tx, userId, friendId))) throw notFriends(field)
-  const [u] = await tx.select().from(users).where(eq(users.id, friendId))
-  if (!u) throw notFriends(field)
-  return u
-}
-
-/** Exact, case-insensitive email match only (spec §3.8): no partial matches, so accounts can't be enumerated. */
-export async function searchByEmail(userId: string, email: string): Promise<FriendSearchResult | null> {
-  const db = getDb()
-  const [u] = await db.select().from(users).where(byEmail(email))
-  if (!u) return null
-  if (u.id === userId) return { ...view(u), relation: 'self', requestId: null }
-  const [f] = await db.select().from(friendships).where(pair(userId, u.id))
-  const relation: FriendRelation = !f ? 'none' : f.status === 'accepted' ? 'friends' : f.requesterId === userId ? 'outgoing' : 'incoming'
-  return { ...view(u), relation, requestId: f?.id ?? null }
-}
-
-async function accept(tx: Tx, f: Friendship, accepter: User): Promise<void> {
-  await tx.update(friendships).set({ status: 'accepted', respondedAt: new Date() }).where(eq(friendships.id, f.id))
-  // Hide Accept / Decline on the addressee's notification. (A Date inside sql`` breaks postgres.js, hence now().)
-  const acted = await tx.update(notifications).set({ actedAt: new Date(), readAt: sql`coalesce(${notifications.readAt}, now())` })
-    .where(requestNote(f.id)).returning({ userId: notifications.userId })
-  await wake(tx, acted.map((r) => r.userId))
-  await notify(tx, [{
-    userId: f.requesterId, kind: 'friend_accepted', title: `${displayNameOf(accepter)} accepted your friend request`,
-    body: 'You can now add each other to groups directly.', href: '/friends', payload: { userId: accepter.id },
-  }])
-}
-
-export async function sendFriendRequest(
-  userId: string, email: string,
-): Promise<{ data: { requestId: string; status: 'pending' | 'accepted'; user: FriendUser } }> {
-  try {
-    return await getDb().transaction(async (tx) => {
-      const [target] = await tx.select().from(users).where(byEmail(email))
-      if (!target) throw invalid('email', 'No Coinflow account uses that email. Invite them with a group link instead.')
-      if (target.id === userId) throw invalid('email', 'That’s you.')
-      const [me] = await tx.select().from(users).where(eq(users.id, userId))
-      if (!me) throw notFound('account')
-      const [existing] = await tx.select().from(friendships).where(pair(userId, target.id)).for('update')
-      const name = displayNameOf(target)
-      if (existing?.status === 'accepted') throw conflict('already_friends', `You and ${name} are already friends.`)
-      if (existing?.requesterId === userId) throw conflict('friend_request_exists', `You’ve already asked ${name}. They haven’t answered yet.`)
-      if (existing) { // they asked first, so asking back is a yes (spec §3.8)
-        await accept(tx, existing, me)
-        return { data: { requestId: existing.id, status: 'accepted' as const, user: view(target) } }
-      }
-      const [row] = await tx.insert(friendships).values({ requesterId: userId, addresseeId: target.id }).returning()
-      await notify(tx, [{
-        userId: target.id, kind: 'friend_request', title: `${displayNameOf(me)} wants to be friends`,
-        body: 'Friends can add each other to groups without an invite link.', href: '/friends',
-        payload: { requestId: row.id, fromUserId: userId },
-      }])
-      return { data: { requestId: row.id, status: 'pending' as const, user: view(target) } }
-    })
-  } catch (err) {
-    // Two crossed requests at the same instant: the pair index lets one in; the other is told plainly.
-    if (pgErrorCode(err) === '23505') throw conflict('friend_request_exists', 'There’s already a request between you two.')
-    throw err
-  }
-}
-
-export async function acceptFriendRequest(userId: string, requestId: string): Promise<{ data: FriendView }> {
-  return getDb().transaction(async (tx) => {
-    const [f] = await tx.select().from(friendships)
-      .where(and(eq(friendships.id, requestId), eq(friendships.addresseeId, userId), eq(friendships.status, 'pending'))).for('update')
-    if (!f) throw notFound('friend request')
-    const [me] = await tx.select().from(users).where(eq(users.id, userId))
-    const [them] = await tx.select().from(users).where(eq(users.id, f.requesterId))
-    if (!me || !them) throw notFound('friend request')
-    await accept(tx, f, me)
-    return { data: { ...view(them), since: new Date() } }
-  })
-}
-
-/** Decline (addressee) or cancel (requester). Silent: the row and the actionable notification both go. */
-export async function dropFriendRequest(userId: string, requestId: string): Promise<{ data: { id: string } }> {
-  return getDb().transaction(async (tx) => {
-    const [f] = await tx.delete(friendships).where(and(
-      eq(friendships.id, requestId), eq(friendships.status, 'pending'),
-      or(eq(friendships.requesterId, userId), eq(friendships.addresseeId, userId)),
-    )).returning()
-    if (!f) throw notFound('friend request')
-    const gone = await tx.delete(notifications).where(requestNote(f.id)).returning({ userId: notifications.userId })
-    await wake(tx, gone.map((r) => r.userId))
-    return { data: { id: f.id } }
-  })
-}
-
-/** Either side may unfriend. Groups, expenses and balances they share are untouched (spec §3.8). */
-export async function unfriend(userId: string, friendUserId: string): Promise<{ data: { userId: string } }> {
-  const rows = await getDb().delete(friendships)
-    .where(and(pair(userId, friendUserId), eq(friendships.status, 'accepted'))).returning({ id: friendships.id })
-  if (rows.length === 0) throw notFound('friend')
-  return { data: { userId: friendUserId } }
-}
-
-export async function listFriends(userId: string): Promise<FriendsOverview> {
-  const rows = await getDb().select({ f: friendships, u: users }).from(friendships)
-    .innerJoin(users, sql`${users.id} = case when ${friendships.requesterId} = ${userId} then ${friendships.addresseeId} else ${friendships.requesterId} end`)
-    .where(or(eq(friendships.requesterId, userId), eq(friendships.addresseeId, userId)))
-    .orderBy(desc(friendships.createdAt))
-  const request = (r: (typeof rows)[number]): FriendRequestView => ({ ...view(r.u), requestId: r.f.id, createdAt: r.f.createdAt })
-  const pending = rows.filter((r) => r.f.status === 'pending')
-  return {
-    friends: rows.filter((r) => r.f.status === 'accepted')
-      .map((r) => ({ ...view(r.u), since: r.f.respondedAt ?? r.f.createdAt }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'en-IN')),
-    incoming: pending.filter((r) => r.f.addresseeId === userId).map(request),
-    outgoing: pending.filter((r) => r.f.requesterId === userId).map(request),
-  }
-}
-```
+`services/friends.ts` was created in Step 15 (the group service imports it).
 
 Append to `src/server/services/groups/members.ts`. Merge the imports into the existing import lines: `pgErrorCode` from `@/server/db/errors`; `Tx` is not needed; `users` is not needed; `notify` from `../notifications`; `displayNameOf`, `requireFriend` from `../friends`; `announceClaim` from `./invites`; `type FriendUserBody` from `@/lib/schemas/friends`. Also add `and`, `eq`, `isNull` if they are missing.
 
@@ -4627,9 +4630,9 @@ describe('friends (spec §3.8)', () => {
     expect(await kinds('user_a')).toEqual([])
     expect(await kinds('user_b')).toEqual([])
     const r2 = await sendFriendRequest('user_a', 'user_b@example.com')
+    await expect(dropFriendRequest('user_c', r2.data.requestId)).rejects.toMatchObject({ status: 404 })
     await dropFriendRequest('user_a', r2.data.requestId)
     expect((await listFriends('user_b')).incoming).toEqual([])
-    await expect(dropFriendRequest('user_c', r2.data.requestId)).rejects.toMatchObject({ status: 404 })
 
     await befriend('user_a', 'user_b')
     const { data: g } = await createGroup('user_a', { name: 'Flat', friendIds: ['user_b'] })
@@ -4882,6 +4885,7 @@ All paths are under `apps/web/`. `pnpm` runs in `apps/web` and `git` runs from t
 - **Consumes (Task 1):**
   - **HTTP:** every route in Task 1 Step 21.
   - **DTOs:** `GroupSummaryDTO`, `GroupDetailDTO` (`members: GroupMemberDTO[]` with `claimed`, `isMe`, `upiId`, `upiQrUrl`, `removedAt`), `GroupExpenseDTO` (`payers`, `shares[].inputValue`, `items`, `myPaidPaise`, `mySharePaise`), `BalancesDTO` (`nets`, `payments: Payment[]`, `pending: SettlementDTO[]`), `ActivityDTO`, `NotificationDTO` (`seq`, `kind`, `title`, `body`, `href`, `payload`, `readAt`, `actedAt`), `InviteDTO` (`url`), `InvitePreviewDTO`, `Page<T>`.
+  - **Friends (Step 22b):** DTOs `FriendsDTO`, `FriendSearchDTO` and `GroupMemberDTO.userId`; routes `/friends*`, `/groups/[id]/members/friends`, `/groups/[id]/members/[memberId]/link`; `friendIds` on `POST /groups`.
   - **Pure logic:** `computeSplit`, `checkPayers`, `SplitMismatchError`, `FULL_PERCENT_BP`, `type SplitMode`, `type SplitSpec`, `whyText`, `type Payment`.
   - **Schemas:** `GroupExpenseBody`, `GroupCreateBody`, `SettlementCreate`, `MemberCreate`, `MemberPatch`, `ClaimBody`.
   - **Server:** `previewInvite`, `getGroup`, `listGroups`.
@@ -4900,6 +4904,7 @@ All paths are under `apps/web/`. `pnpm` runs in `apps/web` and `git` runs from t
     - `percentToBasisPoints(text): number | null`
     - `basisPointsToText(bp): string`
   - `gk` query keys; `useGroups`, `useGroup`, `useGroupExpense`, `useBalances`.
+  - **Friends:** `fk` query keys; `useFriends`, `useFriendSearch`, `useSendFriendRequest`, `useAcceptFriend`, `useDropFriendRequest`, `useUnfriend`, `useAddFriendMember`, `useLinkFriend`.
   - **Group expense mutations:**
     - `useCreateGroupExpense()` (vars `{ groupId; body: GroupExpenseBody }`)
     - `useUpdateGroupExpense()`
@@ -7093,19 +7098,20 @@ Create `src/components/friends/friends-view.tsx`. This is a spec plus skeleton, 
 //    "Decline" (aria-label `Decline ${name}`, variant outline; label 'Request declined').
 //    outgoing rows: name + "Waiting for them to accept" + Button "Cancel" (aria-label `Cancel request to ${name}`).
 //
-// 3. "Your friends" card. <ul aria-label="Your friends">: MemberAvatar + name + email. A "Remove" button
-//    (aria-label `Remove ${name} from friends`) → confirm Dialog "Remove Asha from friends? You stay in the same groups;
+// 3. "Your friends" card. <ul aria-label="Your friends">: MemberAvatar + name + email. A "Unfriend" button
+//    (aria-label `Unfriend ${name}`) → confirm Dialog "Unfriend Asha? You stay in the same groups;
 //    nothing you share changes." → useUnfriend. Empty state: "No friends yet. Search by email above."
 //
 // After any action, move focus to a sensible place: the search input after sending, the next row's first button (or the
-// card heading, tabIndex -1) after accept/decline/remove, so focus never drops to <body> (Part A I13 rule).
+// card heading, tabIndex -1) after accept/decline/unfriend, so focus never drops to <body> (Part A I13 rule).
 export function FriendsView(props: { initial: FriendsDTO }) { /* as specified above */ }
 ```
 
 **Entry points.**
 - **`src/components/groups/groups-view.tsx`:** next to "New group or event" in the page header, add `<Link href="/friends">` styled as an outline button "Friends". When `useFriends().data.incoming.length > 0`, append a count badge, and set the accessible name to `Friends, ${n} request(s)` so the count isn't read twice.
 - **`src/components/profile/profile-view.tsx`:** in the same card as `GroupPrefs`, add a 48 px row link "Friends", with the hint "Find people by email and manage requests", to `/friends`.
-- **`src/components/shell/nav-items.ts`:** unchanged. The spec keeps five mobile tabs, and Friends is reached from Groups and Profile. Add it to the command palette's page list if the palette has one (`'Friends' → /friends`).
+- **`src/components/shell/nav-items.ts`:** unchanged. The spec keeps five mobile tabs, and Friends is reached from Groups and Profile.
+- **`src/components/shell/command-palette.tsx`:** add a `Friends → /friends` item next to the NAV_ITEMS pages.
 
 **Members tab.** Add the following to the `src/components/groups/members-tab.tsx` spec, as sections 3a and 3b, and implement them:
 
@@ -7140,13 +7146,14 @@ export function FriendsView(props: { initial: FriendsDTO }) { /* as specified ab
 ```tsx
   const requestId = typeof n.payload.requestId === 'string' ? n.payload.requestId : null
   const friendAsk = n.kind === 'friend_request' && !n.actedAt && requestId
+  const fromName = typeof n.payload.fromName === 'string' ? n.payload.fromName : 'them'
   const accept = useAcceptFriend()
   const drop = useDropFriendRequest()
   // …after the settlement actions:
   {friendAsk && (
     <div className="mt-1 flex gap-2 pl-9">
       <Button size="sm" className="min-h-12 rounded-chip active:scale-[0.97]" aria-disabled={accept.isPending || undefined}
-        onClick={() => accept.mutate({ requestId, name: n.title.replace(/ wants to be friends$/, '') })}>Accept</Button>
+        onClick={() => accept.mutate({ requestId, name: fromName })}>Accept</Button>
       <Button size="sm" variant="outline" className="min-h-12 rounded-chip active:scale-[0.97]" aria-disabled={drop.isPending || undefined}
         onClick={() => drop.mutate({ requestId, label: 'Request declined' })}>Decline</Button>
     </div>
@@ -7167,10 +7174,7 @@ export function FriendsView(props: { initial: FriendsDTO }) { /* as specified ab
   - dialog "Who is <placeholder>?" with a "Link" button
 - **New-group sheet:** group "Friends" containing toggle buttons named after each friend.
 
-Add a smoke step to this task's Step 12 temp page:
-- render `FriendsView` with a stubbed `initial` (one incoming request, one friend);
-- check the Accept / Decline / Remove buttons are reachable by Tab at 390 px;
-- check there is no sideways scroll at 320 px.
+The FriendsView smoke check is item (m) in Step 12.
 
 - [ ] **Step 11: Shell, Activity mirror rows, and Profile toggles**
 
@@ -7282,7 +7286,8 @@ Create `src/app/smoke-groups/page.tsx`. It sits outside `(app)`, so there is no 
   - `gk.detail('00000000-0000-4000-8000-000000000001')`: a `GroupDetailDTO` with members You (claimed, creator), Asha (claimed) and Ravi (placeholder), where Asha has `upiId: 'asha@okhdfc'`;
   - `qk.categories('expense')`: three built-in categories;
   - `gk.notifications`: one unread `settlement_marked`.
-- It mounts `GroupSheetsProvider` with buttons "Open expense", "Open settle", "Open join" (renders `JoinView` with a fake preview) and a `NotificationBell`.
+  - `fk.all`: a `FriendsDTO` with one incoming request and one friend (Asha), seeded with `setQueryData` the same way as `gk.*`, so `FriendsView`'s mount refetch of `/friends` (which would 401 on this Clerk-less page) is not needed.
+- It mounts `GroupSheetsProvider` with buttons "Open expense", "Open settle", "Open join" (renders `JoinView` with a fake preview) and a `NotificationBell`. It also renders `FriendsView` with `initial` set to that same stubbed `FriendsDTO`.
 
 Run `pnpm dev` with the PID captured, and drive it with the Playwright MCP (or `pnpm dlx playwright@1.64 …` with a throwaway script in the scratchpad). Check each item at 390×844 and at 1440×900:
 
@@ -7301,6 +7306,7 @@ Run `pnpm dev` with the PID captured, and drive it with the Playwright MCP (or `
 - (j) The bell shows "Notifications, 1 unread" with Confirm / Not received.
 - (k) axe (`@axe-core/playwright`) has zero serious/critical findings on the open expense sheet and on the settle sheet.
 - (l) There is no sideways scroll at 320 px with the sheet open.
+- (m) `FriendsView` (stubbed initial: one incoming request, one friend): at 390 px, Tab reaches Accept, Decline and Unfriend; at 320 px there is no sideways scroll.
 
 Kill only the captured PID, then delete `src/app/smoke-groups/` and the scratch script.
 
@@ -7313,7 +7319,7 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 Expected: all pass. The Part A E2E specs are not run here; Task 5 runs the whole suite.
 
 ```bash
-git add apps/web/package.json pnpm-lock.yaml apps/web/src/lib/expense-form.ts apps/web/src/lib/expense-form.test.ts apps/web/src/lib/reminder.ts apps/web/src/lib/reminder.test.ts apps/web/src/lib/group-display.ts apps/web/src/lib/group-display.test.ts apps/web/src/hooks/group-queries.ts apps/web/src/hooks/queries.ts apps/web/src/components/groups apps/web/src/components/join apps/web/src/components/notifications apps/web/src/components/profile/group-prefs.tsx apps/web/src/components/profile/profile-view.tsx apps/web/src/components/shell/nav-items.ts apps/web/src/components/shell/bottom-tabs.tsx apps/web/src/components/shell/top-bar.tsx apps/web/src/components/shell/app-shell.tsx apps/web/src/components/activity/transaction-row.tsx "apps/web/src/app/(app)/groups" "apps/web/src/app/(app)/friends" apps/web/src/components/friends apps/web/src/app/join
+git add apps/web/package.json pnpm-lock.yaml apps/web/src/lib/expense-form.ts apps/web/src/lib/expense-form.test.ts apps/web/src/lib/reminder.ts apps/web/src/lib/reminder.test.ts apps/web/src/lib/group-display.ts apps/web/src/lib/group-display.test.ts apps/web/src/hooks/group-queries.ts apps/web/src/hooks/queries.ts apps/web/src/components/groups apps/web/src/components/join apps/web/src/components/notifications apps/web/src/components/profile/group-prefs.tsx apps/web/src/components/profile/profile-view.tsx apps/web/src/components/shell/nav-items.ts apps/web/src/components/shell/bottom-tabs.tsx apps/web/src/components/shell/top-bar.tsx apps/web/src/components/shell/app-shell.tsx apps/web/src/components/shell/command-palette.tsx apps/web/src/components/activity/transaction-row.tsx "apps/web/src/app/(app)/groups" "apps/web/src/app/(app)/friends" apps/web/src/components/friends apps/web/src/app/join
 git commit -m "feat(groups-ui): groups tab, group page, expense sheet with receipt canvas, settle up, join, notifications bell
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -12340,6 +12346,7 @@ All paths are under `apps/web/` unless they start with `docs/`. `pnpm` runs in `
   - `playwright.config.ts` (`@capture` excluded unless `CAPTURE=1`)
 - **Create (E2E):**
   - `e2e/groups.spec.ts` (the B journey across two users)
+  - `e2e/friends.spec.ts` (friends across two people, spec §3.8)
   - `e2e/agent.spec.ts` (stubbed agent: approve, offline, coach nudge)
   - `e2e/groups-a11y.spec.ts` (axe + reflow for `/groups`, `/groups/[id]` tabs, `/join/[token]`, open sheets, agent panel)
   - `e2e/capture-bc.spec.ts` (`@capture`, screenshots for the HCI doc)
@@ -12395,6 +12402,35 @@ export function serviceToken(): string {
 }
 ```
 
+Also export these two shared fixtures from `e2e/helpers.ts` (specs must never import one spec file from another: Playwright refuses with `test file "x.spec.ts" should not import test file "y.spec.ts"`):
+
+```ts
+/** A group with one expense, made through the API so every tab has content. Placeholders: 'Asha' and 'Ravi'. Returns ids and the invite path. */
+export async function seedGroup(page: Page) {
+  const created = await (await page.request.post('/api/v1/groups', { data: { name: 'A11y trip', kind: 'event', placeholders: [{ displayName: 'Asha' }, { displayName: 'Ravi' }] } })).json()
+  const g = created.data
+  const food = (await (await page.request.get('/api/v1/categories?kind=expense')).json()).data.find((c: { name: string }) => c.name === 'Food & Dining').id
+  await page.request.post(`/api/v1/groups/${g.id}/expenses`, { data: {
+    description: 'Dinner', amountPaise: 90_000, categoryId: food,
+    payers: [{ memberId: g.myMemberId, paidPaise: 90_000 }], split: { mode: 'equal', memberIds: g.members.map((m: { id: string }) => m.id) },
+  } })
+  const invite = (await (await page.request.get(`/api/v1/groups/${g.id}/invite`)).json()).data.url as string
+  return { id: g.id as string, invitePath: new URL(invite).pathname }
+}
+
+/** Fixture accounts (never real Clerk users) so every /friends card renders: the E2E user is friends with 'Asha Fixture' and has a pending request from 'Ravi Fixture'. global.setup deletes `user_fixture_%`. */
+export async function seedFriends() {
+  await withSql(async (sql) => {
+    const [u] = await sql`select id from users where email = ${e2eEmail()}`
+    await sql`delete from users where id in ('user_fixture_friend', 'user_fixture_asker')`
+    await sql`insert into users (id, email, name) values ('user_fixture_friend', 'fixture-friend@example.com', 'Asha Fixture'),
+      ('user_fixture_asker', 'fixture-asker@example.com', 'Ravi Fixture')`
+    await sql`insert into friendships (requester_id, addressee_id, status, responded_at) values (${u.id}, 'user_fixture_friend', 'accepted', now())`
+    await sql`insert into friendships (requester_id, addressee_id) values ('user_fixture_asker', ${u.id})`
+  })
+}
+```
+
 Change `signIn(page)` to `signIn(page: Page, email = e2eEmail())`. Use `email` in both the reset `update users … where email = ${email}` and `clerk.signIn({ page, emailAddress: email })`.
 
 Change `signInOnboarded(page, balanceRupees = 50_000)` to `signInOnboarded(page: Page, balanceRupees = 50_000, email = e2eEmail())`. Pass `email` to `signIn`, and use it in the user lookup (`select id from users where email = ${email}`). Before the existing per-user deletes, add:
@@ -12404,12 +12440,17 @@ Change `signInOnboarded(page, balanceRupees = 50_000)` to `signInOnboarded(page:
     await sql`delete from friendships where requester_id = ${u.id} or addressee_id = ${u.id}` // spec §3.8
 ```
 
-`e2e/global.setup.ts`. After the existing reset, add a second reset step:
+`e2e/global.setup.ts`. Add `hasE2E2User, e2e2Email` to its import from `'./helpers'` (it currently imports `e2eEmail, hasE2EUser, withSql`). After the existing reset, add a second reset step and a fixture cleanup step:
 
 ```ts
 setup('reset the second e2e user', async () => {
   setup.skip(!hasE2E2User(), 'E2E2_CLERK_USER_EMAIL is not set')
   await withSql((sql) => sql`delete from users where email = ${e2e2Email()}`)
+})
+
+setup('delete the friends fixture users', async () => {
+  // seedFriends() (groups-a11y and capture specs) leaves these behind; they must not linger in the dev DB.
+  await withSql((sql) => sql`delete from users where id like 'user_fixture_%'`)
 })
 ```
 
@@ -12555,8 +12596,6 @@ test('friend by email → accept from the bell → add to a group directly → t
   await signInOnboarded(page)
   await page.goto('/friends')
   await expect(page.getByRole('heading', { level: 1, name: 'Friends' })).toBeVisible()
-  await page.getByLabel('Their email').fill(friendEmail.slice(0, 5)) // partial: never matches
-  await expect(page.getByRole('button', { name: 'Add friend' })).toHaveCount(0)
   await page.getByLabel('Their email').fill(friendEmail.toUpperCase())
   await page.getByRole('button', { name: 'Add friend' }).click()
   await expect(page.getByText(/^Request sent to /)).toBeVisible()
@@ -12678,7 +12717,7 @@ Run: `pnpm exec playwright test e2e/agent.spec.ts`. Expected: 6 passed (3 × des
 ```ts
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { e2e2Email, e2eEmail, hasE2E2User, signInOnboarded, withSql } from './helpers'
+import { e2e2Email, hasE2E2User, seedFriends, seedGroup, signInOnboarded } from './helpers'
 
 async function serious(page: Page) {
   const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
@@ -12696,19 +12735,6 @@ async function noSidewaysScroll(page: Page, path: string, ready: (p: Page) => Pr
         { message: `${path} at ${width}px (${reducedMotion})` }).toBeLessThanOrEqual(width)
     }
   }
-}
-
-/** A group with one expense, made through the API so every tab has content. Returns ids and the invite path. */
-async function seedGroup(page: Page) {
-  const created = await (await page.request.post('/api/v1/groups', { data: { name: 'A11y trip', kind: 'event', placeholders: [{ displayName: 'Asha' }, { displayName: 'Ravi' }] } })).json()
-  const g = created.data
-  const food = (await (await page.request.get('/api/v1/categories?kind=expense')).json()).data.find((c: { name: string }) => c.name === 'Food & Dining').id
-  await page.request.post(`/api/v1/groups/${g.id}/expenses`, { data: {
-    description: 'Dinner', amountPaise: 90_000, categoryId: food,
-    payers: [{ memberId: g.myMemberId, paidPaise: 90_000 }], split: { mode: 'equal', memberIds: g.members.map((m: { id: string }) => m.id) },
-  } })
-  const invite = (await (await page.request.get(`/api/v1/groups/${g.id}/invite`)).json()).data.url as string
-  return { id: g.id as string, invitePath: new URL(invite).pathname }
 }
 
 const TABS = ['expenses', 'balances', 'activity', 'members'] as const
@@ -12738,6 +12764,17 @@ test('no serious axe violations with the expense sheet (itemized), the settle sh
   await sheet.getByRole('button', { name: 'Add item' }).click()
   expect(await serious(page)).toEqual([])
   await page.keyboard.press('Escape')
+  // Friend surfaces inside a group: the "Add from friends" list and the link dialog. seedFriends() makes the E2E user
+  // friends with 'Asha Fixture', so the Add-from-friends list renders; seedGroup created placeholders 'Asha' and 'Ravi'.
+  await seedFriends()
+  await page.goto(`/groups/${g.id}?tab=members`)
+  await expect(page.getByRole('list', { name: 'Add from friends' })).toBeVisible()
+  expect(await serious(page)).toEqual([])
+  await page.getByRole('button', { name: 'Link Asha to a friend' }).click()
+  await expect(page.getByRole('dialog', { name: 'Who is Asha?' })).toBeVisible()
+  expect(await serious(page)).toEqual([])
+  await page.keyboard.press('Escape')
+  await page.goto(`/groups/${g.id}`)
   await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: { online: true, capabilities: { chat: true, vision: true, stt: true, tts: true } } } }))
   await page.reload()
   await page.getByRole('button', { name: /^Ask Coinflow…/ }).click()
@@ -12758,21 +12795,9 @@ test('the join page passes axe for the second person', async ({ page, browser })
   await ctx2.close()
 })
 
-/** A fixture account (never a real Clerk user) with a pending request and a friendship, so every /friends card renders. */
-async function seedFriends(page: Page) {
-  await withSql(async (sql) => {
-    const [u] = await sql`select id from users where email = ${e2eEmail()}`
-    await sql`delete from users where id in ('user_fixture_friend', 'user_fixture_asker')`
-    await sql`insert into users (id, email, name) values ('user_fixture_friend', 'fixture-friend@example.com', 'Asha Fixture'),
-      ('user_fixture_asker', 'fixture-asker@example.com', 'Ravi Fixture')`
-    await sql`insert into friendships (requester_id, addressee_id, status, responded_at) values (${u.id}, 'user_fixture_friend', 'accepted', now())`
-    await sql`insert into friendships (requester_id, addressee_id) values ('user_fixture_asker', ${u.id})`
-  })
-}
-
 test('/friends passes axe with a request, a friend and a search result', async ({ page }) => {
   await signInOnboarded(page)
-  await seedFriends(page)
+  await seedFriends()
   await page.goto('/friends')
   await expect(page.getByRole('list', { name: 'Your friends' })).toBeVisible()
   await page.getByLabel('Their email').fill('fixture-friend@example.com')
@@ -12786,7 +12811,7 @@ test('new routes reflow at 390 and 320 in both motion settings', async ({ page, 
   await signInOnboarded(page)
   const g = await seedGroup(page)
   await noSidewaysScroll(page, '/groups', (p) => expect(p.getByRole('heading', { level: 1, name: 'Groups & events' })).toBeVisible())
-  await seedFriends(page)
+  await seedFriends()
   await noSidewaysScroll(page, '/friends', (p) => expect(p.getByRole('heading', { level: 1, name: 'Friends' })).toBeVisible())
   for (const tab of TABS) {
     await noSidewaysScroll(page, `/groups/${g.id}?tab=${tab}`, (p) => expect(p.getByRole('tab', { name: new RegExp(tab, 'i'), selected: true })).toBeVisible())
@@ -12801,7 +12826,7 @@ test('new routes reflow at 390 and 320 in both motion settings', async ({ page, 
 })
 ```
 
-If `withSql` or `e2eEmail` is not exported from `e2e/helpers.ts` yet, export it; both exist from Part A. The fixture users are deleted again by the next run's `seedFriends`, and `global.setup` may also delete `user_fixture_%`.
+The fixture users are deleted by the next `seedFriends()` and by `global.setup` (`user_fixture_%`). The shared `seedGroup` and `seedFriends` live in `e2e/helpers.ts` (Step 1).
 
 Run: `pnpm exec playwright test e2e/groups-a11y.spec.ts`. Expected: all pass. The reflow test is skipped on desktop.
 
@@ -12813,7 +12838,7 @@ Fix real findings in the app. The common ones:
 - [ ] **Step 5: Screens for the HCI doc (`@capture`)**
 
 `e2e/capture-bc.spec.ts`. It is tagged `@capture` and runs only with `CAPTURE=1`. It writes PNGs into `../../docs/hci/screens/` and follows Part A's conventions: `-1440` in dark and `-390` in light, with `reducedMotion: 'reduce'` and a production build.
-- It reuses the setup from `groups.spec.ts`: an E2E user's event, the multi-payer dinner, and the second user's claim.
+- It repeats the setup from `groups.spec.ts` (an E2E user's event, the multi-payer dinner, and the second user's claim) using helpers imported from `./helpers` (`seedGroup`, `seedFriends`, `signInOnboarded`, …). Never import one spec file from another: Playwright refuses.
 - It stubs the agent the way `agent.spec.ts` does.
 
 | File | State |
@@ -12825,7 +12850,7 @@ Fix real findings in the app. The common ones:
 | `b-settle` | the settle sheet with "No QR yet" or a QR |
 | `b-join` | the second user on `/join` |
 | `b-notification-confirm` | the bell open with Confirm / Not received |
-| `b-friends` | `/friends` with one incoming request, one friend, and a search result (use `seedFriends` from the a11y spec) |
+| `b-friends` | `/friends` with one incoming request, one friend, and a search result (import `seedFriends` from `./helpers`) |
 | `c-panel-proposal` | the panel with a pending expense chip |
 | `c-voice-status` | the panel showing "Listening…". Drive it by dispatching the `listening` status through the stubbed mic: deny the permission after the status shows, then capture before the denial note. |
 | `c-offline` | the pill reading "Assistant offline" |
