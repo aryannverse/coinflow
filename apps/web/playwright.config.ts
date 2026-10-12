@@ -12,6 +12,8 @@ export default defineConfig({
   testDir: 'e2e',
   fullyParallel: false,
   workers: 1,
+  // Screens for the HCI docs run only on request (CAPTURE=1), against a production build.
+  grepInvert: process.env.CAPTURE ? undefined : /@capture/,
   reporter: [['list'], ['html', { open: 'never' }]],
   // Runs once in the main process so CLERK_TESTING_TOKEN reaches every worker.
   globalSetup: './e2e/global-setup.ts',
