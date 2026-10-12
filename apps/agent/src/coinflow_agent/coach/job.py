@@ -1,12 +1,13 @@
 """Scheduler + runner (spec §4.6, plan A9). APScheduler, :30 past each hour 08:30–21:30 IST. Each user runs once per day
-at their first slot outside quiet hours; the server also caps coach notifications at 2 per day and dedupes by key."""
+at their first slot outside quiet hours; the server also caps coach notifications at 2 per day and dedupes by key.
+On Vercel (spec §10, COACH_MODE=cron) a daily cron calls run_all instead: every user once, judged at 08:30 IST."""
 
 import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,7 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..api_client import InternalClient
 from ..settings import Settings
-from .rules import Nudge, pick_nudges, should_run
+from .rules import FIRST_RUN, Nudge, in_quiet_hours, pick_nudges, should_run
 
 IST = ZoneInfo("Asia/Kolkata")
 log = logging.getLogger("coinflow.coach")
@@ -38,24 +39,48 @@ class CoachRunner:
             if not should_run(now, self.last_run.get(uid), facts.get("quietHours")):
                 continue
             self.last_run[uid] = now.date()
-            for nudge in pick_nudges(facts, now):
-                if self.polish:
-                    try:
-                        nudge = await self.polish(nudge)
-                    except Exception:
-                        log.warning("coach wording failed; using the template", exc_info=True)
-                status = await self.client.post_notification(
-                    {
-                        "userId": uid,
-                        "kind": nudge.kind,
-                        "title": nudge.title,
-                        "body": nudge.body,
-                        "href": nudge.href,
-                        "dedupeKey": nudge.dedupe_key,
-                    }
-                )
-                if status == 201:
-                    sent += 1
+            sent += await self._deliver(facts, now)
+        return sent
+
+    async def run_all(self) -> dict[str, int]:
+        """The cron run (spec §10): every user once. Hobby crons may fire late within the hour, so quiet hours are judged
+        at 08:30 IST, the advertised time; a user whose quiet hours cover it is skipped for the day. One user's failure
+        is logged and never stops the others."""
+        now = self.clock()
+        at_0830 = datetime.combine(now.date(), time(FIRST_RUN.hour, FIRST_RUN.minute), tzinfo=IST)
+        users = await self.client.coach_digest()
+        summary = {"users": len(users), "sent": 0, "skipped": 0, "failed": 0}
+        for facts in users:
+            if in_quiet_hours(at_0830, facts.get("quietHours")):
+                summary["skipped"] += 1
+                continue
+            try:
+                summary["sent"] += await self._deliver(facts, now)
+            except Exception:
+                summary["failed"] += 1
+                log.warning("coach run failed for one user", exc_info=True)
+        return summary
+
+    async def _deliver(self, facts: dict, now: datetime) -> int:
+        sent = 0
+        for nudge in pick_nudges(facts, now):
+            if self.polish:
+                try:
+                    nudge = await self.polish(nudge)
+                except Exception:
+                    log.warning("coach wording failed; using the template", exc_info=True)
+            status = await self.client.post_notification(
+                {
+                    "userId": facts["userId"],
+                    "kind": nudge.kind,
+                    "title": nudge.title,
+                    "body": nudge.body,
+                    "href": nudge.href,
+                    "dedupeKey": nudge.dedupe_key,
+                }
+            )
+            if status == 201:
+                sent += 1
         return sent
 
 

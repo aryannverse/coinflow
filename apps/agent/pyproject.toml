@@ -50,6 +50,11 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+# Vercel (spec §10): the FastAPI app is one Python function. Vercel installs with `uv sync --no-dev --frozen`, so the
+# speech extra (torch, faster-whisper, Kokoro) stays out of the bundle; speech runs on Groq there (STT/TTS_PROVIDER=groq).
+[tool.vercel]
+entrypoint = "index:app"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

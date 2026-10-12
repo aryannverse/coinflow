@@ -1,7 +1,13 @@
-"""Trip/event planner (spec §4.3): a Deep Agents sub-agent behind one tool, plan_event. Its inner drafts are collected
-into ONE plan_bundle proposal: an event, budgets per category and a checklist."""
+"""Trip/event planner (spec §4.3): a sub-agent behind one tool, plan_event. Its inner drafts are collected into ONE
+plan_bundle proposal: an event, budgets per category and a checklist.
 
-from deepagents import create_deep_agent
+Engines (PLANNER_ENGINE): "deep" is the Deep Agents planner; "light" (default) is a plain langchain create_agent with the
+same tools and prompt. Deep Agents adds ~1.8k tokens of scaffolding to every planner call, which pushed a 6–8 call plan
+past Groq's free-tier 8,000 tokens a minute in the live check (2026-10-13); the light planner made the same plan in ~5.5k."""
+
+from typing import Literal
+
+from langchain.agents import create_agent
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
@@ -28,13 +34,15 @@ def finish_plan(checklist: list[str]) -> tuple[str, dict]:
     return "Plan finished.", {"kind": "checklist", "items": items}
 
 
-def build_planner(model):  # noqa: ANN001, ANN201
-    return create_deep_agent(
-        model=model,
-        tools=[list_categories, propose_group_event, propose_budget, finish_plan],
-        system_prompt=PLANNER_PROMPT,
-        context_schema=AgentContext,
-    )
+def build_planner(model, engine: Literal["light", "deep"] = "light"):  # noqa: ANN001, ANN201
+    tools = [list_categories, propose_group_event, propose_budget, finish_plan]
+    if engine == "light":
+        return create_agent(model, tools, system_prompt=PLANNER_PROMPT, context_schema=AgentContext)
+    if engine == "deep":
+        from deepagents import create_deep_agent
+
+        return create_deep_agent(model=model, tools=tools, system_prompt=PLANNER_PROMPT, context_schema=AgentContext)
+    raise ValueError(f"unknown planner engine {engine!r}")
 
 
 def make_plan_tool(planner):  # noqa: ANN001, ANN201

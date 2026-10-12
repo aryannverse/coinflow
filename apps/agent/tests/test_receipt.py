@@ -1,4 +1,11 @@
-from coinflow_agent.receipt import RawItem, RawReceipt, normalize_receipt, sniff_image
+import pytest
+from pydantic import ValidationError
+
+from coinflow_agent.receipt import RawItem, RawReceipt, normalize_receipt, read_receipt, sniff_image
+from coinflow_agent.settings import Settings
+from tests.fake_llm import ScriptedChatModel, say
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 16
 
 
 def raw(**over) -> RawReceipt:  # noqa: ANN003
@@ -94,3 +101,55 @@ def test_sniffs_only_real_images():
     assert sniff_image(b"\xff\xd8\xff\xe0") == "image/jpeg"
     assert sniff_image(b"RIFF\x00\x00\x00\x00WEBPVP8 ") == "image/webp"
     assert sniff_image(b"hello") is None
+
+
+# Groq fix (live check 2026-10-13): strict json_schema on qwen3.8 garbled values; json_object mode with the shape spelled
+# out in the prompt read the same receipt correctly 4/4 times.
+GOOD_JSON = (
+    '{"merchant": "SPICE GARDEN", "date": "2026-10-12", "items": [{"name": "Paneer tikka", "amount": "320"}],'
+    ' "tax": "24", "tip": null, "discount": "50", "total": "294", "confidence": 0.95}'
+)
+
+
+async def test_json_object_mode_reads_the_receipt_and_asks_for_json():
+    model = ScriptedChatModel(script=[say(GOOD_JSON)])
+    raw = await read_receipt(model, PNG_BYTES, "image/png")
+    assert raw.merchant == "SPICE GARDEN" and raw.items == [RawItem(name="Paneer tikka", amount="320")] and raw.total == "294"
+    assert model.seen_kwargs[0]["response_format"] == {"type": "json_object"}
+    [message] = model.seen[0]
+    text = message.content[0]["text"]
+    assert "json" in text.lower() and '"items": [{"name": string, "amount": string}]' in text
+    assert message.content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert normalize_receipt(raw).mismatch is False  # 320 + 24 − 50 = 294: the honesty checks still run on top
+
+
+async def test_code_fences_around_the_json_are_stripped():
+    for fenced in (f"```json\n{GOOD_JSON}\n```", f"```\n{GOOD_JSON}\n```", f"  {GOOD_JSON}  "):
+        raw = await read_receipt(ScriptedChatModel(script=[say(fenced)]), PNG_BYTES, "image/png")
+        assert raw.total == "294"
+
+
+async def test_invalid_json_is_an_error_not_a_guess():
+    for bad in ("I can't read this receipt.", '{"merchant": "X"}', '{"items": "nope", "total": 5}'):
+        with pytest.raises(ValidationError):
+            await read_receipt(ScriptedChatModel(script=[say(bad)]), PNG_BYTES, "image/png")
+
+
+async def test_json_schema_mode_is_still_available():
+    calls: list[tuple] = []
+
+    class Structured:
+        async def ainvoke(self, messages):  # noqa: ANN001, ANN202
+            return RawReceipt.model_validate_json(GOOD_JSON)
+
+    class Model:
+        def with_structured_output(self, schema, **kw):  # noqa: ANN001, ANN003, ANN202
+            calls.append((schema, kw))
+            return Structured()
+
+    raw = await read_receipt(Model(), PNG_BYTES, "image/png", mode="json_schema")
+    assert raw.total == "294" and calls == [(RawReceipt, {"method": "json_schema", "strict": True})]
+
+
+def test_receipt_json_mode_defaults_to_json_object():
+    assert Settings(_env_file=None).receipt_json_mode == "json_object"

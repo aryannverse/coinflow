@@ -1,12 +1,15 @@
-"""FastAPI app (spec §4.1). Listens on localhost or the compose network only; Next is its only client."""
+"""FastAPI app (spec §4.1). Locally it listens on localhost or the compose network; on Vercel (spec §10) it is a public
+function whose every endpoint except /health needs an internal token (or, for /coach/run, the cron secret). Next is its
+only user-facing client."""
 
 import asyncio
+import hmac
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Annotated, Literal
 
 import psycopg
-from fastapi import Depends, FastAPI, Request, UploadFile
+from fastapi import Depends, FastAPI, Header, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -18,11 +21,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartParser
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from . import groq_speech, speech
 from . import receipt as receipt_mod
-from . import speech
 from .agent import build_agent
-from .api_client import CoinflowClient
+from .api_client import CoinflowClient, InternalClient
 from .auth import require_user
+from .coach.job import CoachRunner, make_polisher
 from .coach.job import start_coach as start_coach_scheduler
 from .context import AgentContext
 from .llm import make_chat_model, make_vision_model
@@ -31,15 +35,16 @@ from .settings import Settings, get_settings
 from .stream import chat_events
 
 log = logging.getLogger("coinflow.agent")
-MAX_AUDIO_BYTES = 6 * 1024 * 1024
-MAX_IMAGE_BYTES = 5 * 1024 * 1024  # spec §4.5
+# Spec §10: Vercel refuses request bodies over 4.5 MB, so both caps are 4 MB (the web proxy checks the same numbers).
+MAX_AUDIO_BYTES = 4 * 1024 * 1024
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MULTIPART_OVERHEAD = 64 * 1024
 # Starlette spools multipart files to a temp file on disk above 1 MB. Audio is memory-only and receipts are never stored
 # (spec §4.5), so keep every allowed upload in memory: the cap is enforced before parsing, below.
 MultiPartParser.spool_max_size = MAX_AUDIO_BYTES + MULTIPART_OVERHEAD
 TOO_BIG = {
     "/stt": (MAX_AUDIO_BYTES, "audio_too_large", "That recording is too big. Keep voice notes under 30 seconds."),
-    "/receipt": (MAX_IMAGE_BYTES, "image_too_large", "That photo is over 5 MB. Try a closer, smaller shot."),
+    "/receipt": (MAX_IMAGE_BYTES, "image_too_large", "That photo is over 4 MB. Try a closer, smaller shot."),
 }
 AUDIO_TYPES = {"audio/webm", "audio/ogg", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4"}
 ThreadId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -111,26 +116,57 @@ async def ensure_agent_schema(url: str) -> None:
         await conn.execute("create schema if not exists agent")
 
 
+async def open_checkpointer(stack: AsyncExitStack, url: str):  # noqa: ANN201
+    """LangGraph's Postgres checkpointer in schema "agent" (spec §4.3). A small pool that checks each connection before
+    use, rather than one long-lived connection: on Vercel an instance can outlive a connection (Neon suspends idle
+    computes), and a dead connection must not fail the next chat. Works with Neon's direct URL (?sslmode=require)."""
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg.rows import dict_row
+    from psycopg_pool import AsyncConnectionPool
+
+    await ensure_agent_schema(url)
+    pool = AsyncConnectionPool(
+        with_search_path(url),
+        min_size=1,
+        max_size=4,
+        max_idle=120,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        check=AsyncConnectionPool.check_connection,
+        open=False,
+    )
+    await pool.open(wait=True, timeout=15)
+    stack.push_async_callback(pool.close)
+    saver = AsyncPostgresSaver(pool)
+    await saver.setup()
+    return saver
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ANN201
     s: Settings = app.state.settings
     async with AsyncExitStack() as stack:
         if app.state.agent is None and s.llm_configured:
-            if s.checkpointer == "postgres":
-                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
-                await ensure_agent_schema(s.agent_database_url)
-                saver = await stack.enter_async_context(
-                    AsyncPostgresSaver.from_conn_string(with_search_path(s.agent_database_url))
-                )
-                await saver.setup()
-            else:
-                saver = InMemorySaver()
-            app.state.agent = build_agent(make_chat_model(s), saver)
-        if app.state.start_coach and s.coach_enabled and s.agent_shared_secret:
+            saver = await open_checkpointer(stack, s.agent_database_url) if s.checkpointer == "postgres" else InMemorySaver()
+            app.state.agent = build_agent(make_chat_model(s), saver, planner_engine=s.planner_engine)
+        # Cron mode (Vercel): no in-process scheduler; a daily Vercel Cron calls /coach/run instead (spec §10).
+        if app.state.start_coach and s.coach_enabled and s.agent_shared_secret and s.coach_mode == "scheduler":
             scheduler = start_coach_scheduler(s)
             stack.callback(scheduler.shutdown, wait=False)
         yield
+
+
+def stt_ready(s: Settings) -> bool:
+    return groq_speech.configured(s) if s.stt_provider == "groq" else speech.stt_available()
+
+
+def tts_ready(s: Settings) -> bool:
+    return groq_speech.configured(s) if s.tts_provider == "groq" else speech.tts_available()
+
+
+def cron_authorized(s: Settings, authorization: str | None) -> bool:
+    if not s.cron_secret or not authorization:
+        return False  # no secret configured: the endpoint can't be called at all
+    return hmac.compare_digest(authorization.encode(), f"Bearer {s.cron_secret}".encode())
 
 
 class ChatContext(BaseModel):
@@ -156,11 +192,19 @@ class TtsIn(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
 
 
-def create_app(settings: Settings | None = None, *, agent=None, api_transport=None, start_coach: bool = True) -> FastAPI:  # noqa: ANN001
+def create_app(
+    settings: Settings | None = None,
+    *,
+    agent=None,  # noqa: ANN001
+    api_transport=None,  # noqa: ANN001
+    speech_transport=None,  # noqa: ANN001
+    start_coach: bool = True,
+) -> FastAPI:
     app = FastAPI(title="Coinflow agent", lifespan=lifespan)
     app.state.settings = settings or get_settings()
     app.state.agent = agent
     app.state.api_transport = api_transport
+    app.state.speech_transport = speech_transport
     app.state.start_coach = start_coach
     app.add_middleware(UploadLimit)
 
@@ -182,8 +226,8 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
             "capabilities": {
                 "chat": request.app.state.agent is not None,
                 "vision": s.vision_configured,
-                "stt": speech.stt_available(),
-                "tts": speech.tts_available(),
+                "stt": stt_ready(s),
+                "tts": tts_ready(s),
             },
         }
 
@@ -227,17 +271,30 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
 
     @app.post("/stt")
     async def stt(file: UploadFile, request: Request, user_id: User) -> Response:
-        if not speech.stt_available():
+        s: Settings = request.app.state.settings
+        if not stt_ready(s):
             return err(503, "stt_unavailable", "Voice isn’t installed on the assistant.")
-        if (file.content_type or "").split(";")[0].strip() not in AUDIO_TYPES:
+        content_type = (file.content_type or "").split(";")[0].strip()
+        if content_type not in AUDIO_TYPES:
             return err(415, "audio_type", "Send a webm, ogg, mp4 or wav recording.")
         data = await file.read(MAX_AUDIO_BYTES + 1)
         if len(data) > MAX_AUDIO_BYTES:
             return err(413, "audio_too_large", "That recording is too big. Keep voice notes under 30 seconds.")
         try:
-            text = await run_in_threadpool(speech.transcribe_bytes, data, request.app.state.settings)
+            if s.stt_provider == "groq":
+                name = file.filename or "voice.webm"
+                text = await groq_speech.transcribe(data, name, content_type, s, transport=request.app.state.speech_transport)
+            else:
+                text = await run_in_threadpool(speech.transcribe_bytes, data, s)
         except speech.AudioTooLong:
             return err(413, "audio_too_long", "Keep voice notes under 30 seconds.")
+        except groq_speech.SpeechTimeout:
+            return err(504, "stt_timeout", "Transcribing took too long. Try again, or type it.")
+        except groq_speech.SpeechUpstreamError as exc:
+            log.warning("stt provider error %s", exc.status)
+            if exc.client_error:
+                return err(422, "audio_unreadable", "I couldn’t make that out. Try again, or type it.")
+            return err(503, "stt_unavailable", "Voice is busy right now. Try again in a moment, or type it.")
         except Exception:
             log.exception("stt failed")
             return err(422, "audio_unreadable", "I couldn’t make that out. Try again, or type it.")
@@ -247,10 +304,16 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
 
     @app.post("/tts")
     async def tts(body: TtsIn, request: Request, user_id: User) -> Response:
-        if not speech.tts_available():
+        s: Settings = request.app.state.settings
+        if not tts_ready(s):
             return err(503, "tts_unavailable", "Read-aloud isn’t installed on the assistant.")
         try:
-            wav = await run_in_threadpool(speech.synthesize_wav, body.text, request.app.state.settings)
+            if s.tts_provider == "groq":
+                wav = await groq_speech.synthesize(body.text, s, transport=request.app.state.speech_transport)
+            else:
+                wav = await run_in_threadpool(speech.synthesize_wav, body.text, s)
+        except groq_speech.SpeechTimeout:
+            return err(504, "tts_timeout", "Reading that aloud took too long.")
         except Exception:
             log.exception("tts failed")
             return err(502, "tts_failed", "Couldn’t read that aloud.")
@@ -263,12 +326,14 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
             return err(503, "vision_unavailable", "Receipt scanning needs a vision model (LLM_VISION_MODEL).")
         data = await file.read(MAX_IMAGE_BYTES + 1)
         if len(data) > MAX_IMAGE_BYTES:
-            return err(413, "image_too_large", "That photo is over 5 MB. Try a closer, smaller shot.")
+            return err(413, "image_too_large", "That photo is over 4 MB. Try a closer, smaller shot.")
         mime = receipt_mod.sniff_image(data)
         if not mime:
             return err(415, "image_type", "Send a PNG, JPEG or WebP photo of the receipt.")
         try:
-            raw = await asyncio.wait_for(receipt_mod.read_receipt(make_vision_model(s), data, mime), timeout=s.llm_timeout_s)
+            raw = await asyncio.wait_for(
+                receipt_mod.read_receipt(make_vision_model(s), data, mime, mode=s.receipt_json_mode), timeout=s.llm_timeout_s
+            )
         except TimeoutError:
             return err(504, "llm_timeout", "Reading the receipt took too long. Please try again.")
         except Exception:
@@ -277,6 +342,26 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
         finally:
             del data  # images are never stored
         return JSONResponse(receipt_mod.normalize_receipt(raw).model_dump())
+
+    # Spec §10: the coach in cron mode. Vercel Cron sends GET with "Authorization: Bearer $CRON_SECRET"; POST is accepted
+    # too, for a manual run. The server still caps coach notifications at 2 a day and dedupes them.
+    @app.api_route("/coach/run", methods=["GET", "POST"])
+    async def coach_run(request: Request, authorization: Annotated[str | None, Header()] = None) -> Response:
+        s: Settings = request.app.state.settings
+        if s.coach_mode != "cron":
+            return err(404, "not_found", "Not found.")
+        if not cron_authorized(s, authorization):
+            return err(401, "unauthorized", "Missing or wrong cron secret.")
+        client = InternalClient(s.coinflow_api_url, s.agent_shared_secret, transport=request.app.state.api_transport)
+        try:
+            summary = await CoachRunner(client, polish=make_polisher(s)).run_all()
+        except Exception:
+            log.exception("coach run failed")
+            return err(502, "coach_failed", "The coach couldn’t reach Coinflow.")
+        finally:
+            await client.aclose()
+        log.info("coach run %s", summary)
+        return JSONResponse(summary)
 
     return app
 

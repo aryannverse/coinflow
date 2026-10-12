@@ -39,11 +39,14 @@ def _whisper_model(settings: Settings):  # noqa: ANN202
 
 
 def probe_seconds(data: bytes) -> float | None:
-    """Clip length from the container, without decoding any audio. None when it can't be told (then the decoded length decides)."""
+    """Clip length from the container, without decoding any audio. None when it can't be told (then the decoded length
+    decides). Without PyAV (the speech extra, absent on Vercel) a stdlib header probe reads WAV, Ogg, WebM and MP4."""
     try:
         import av
     except ImportError:
-        return None
+        from .audio_probe import light_seconds
+
+        return light_seconds(data)
     try:
         with av.open(io.BytesIO(data)) as container:
             if container.duration:
@@ -106,7 +109,7 @@ def synthesize_wav(text: str, settings: Settings) -> bytes:
     import numpy as np
 
     chunks = []
-    for result in _kokoro_pipeline()(text, voice=settings.tts_voice):
+    for result in _kokoro_pipeline()(text, voice=settings.tts_voice_name):
         audio = result.audio
         if audio is not None:
             chunks.append(audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio))

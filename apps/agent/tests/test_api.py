@@ -109,8 +109,8 @@ def test_receipt_needs_a_vision_model(settings):
 def test_receipt_parses_with_a_fake_vision_model(settings, monkeypatch):
     vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
 
-    async def fake_read(model, data, mime):  # noqa: ANN001, ANN202
-        assert mime == "image/png"
+    async def fake_read(model, data, mime, *, mode):  # noqa: ANN001, ANN202
+        assert mime == "image/png" and mode == "json_object"
         return receipt.RawReceipt(
             merchant="Toit",
             date=None,
@@ -127,7 +127,24 @@ def test_receipt_parses_with_a_fake_vision_model(settings, monkeypatch):
     assert r.json()["items"] == [{"name": "Thali", "amountPaise": 25_000}] and r.json()["mismatch"] is False
 
 
-@pytest.mark.parametrize(("body", "status"), [(b"hello", 415), (PNG + b"0" * (5 * 1024 * 1024), 413)])
+def test_uploads_are_capped_at_4_mb_under_vercels_body_limit():
+    from coinflow_agent import main
+
+    assert main.MAX_AUDIO_BYTES == main.MAX_IMAGE_BYTES == 4 * 1024 * 1024  # Vercel refuses request bodies over 4.5 MB
+
+
+def test_an_unreadable_vision_reply_is_receipt_unreadable(settings, monkeypatch):
+    from coinflow_agent import main
+
+    vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
+    monkeypatch.setattr(main, "make_vision_model", lambda s: ScriptedChatModel(script=[say("```json\n{not json\n```")]))
+    r = client(vision).post("/receipt", files={"file": ("r.png", PNG, "image/png")}, headers=bearer())
+    assert r.status_code == 502 and r.json()["error"]["code"] == "receipt_unreadable"
+
+
+@pytest.mark.parametrize(
+    ("body", "status"), [(b"hello", 415), (PNG + b"0" * (4 * 1024 * 1024), 413), (PNG + b"0" * (5 * 1024 * 1024), 413)]
+)
 def test_receipt_refuses_non_images_and_big_files(settings, body, status):
     vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
     assert client(vision).post("/receipt", files={"file": ("r.png", body, "image/png")}, headers=bearer()).status_code == status
@@ -144,15 +161,23 @@ def test_oversize_content_length_is_refused_before_the_body_is_parsed(settings, 
     r = c.post(
         "/receipt",
         content=b"x" * 64,
-        headers={**bearer(), "content-type": "multipart/form-data; boundary=x", "content-length": str(6 * 1024 * 1024)},
+        headers={
+            **bearer(),
+            "content-type": "multipart/form-data; boundary=x",
+            "content-length": str(4 * 1024 * 1024 + 70 * 1024),
+        },
     )
     assert r.status_code == 413 and r.json() == {
-        "error": {"code": "image_too_large", "message": "That photo is over 5 MB. Try a closer, smaller shot."}
+        "error": {"code": "image_too_large", "message": "That photo is over 4 MB. Try a closer, smaller shot."}
     }
     r = c.post(
         "/stt",
         content=b"x" * 64,
-        headers={**bearer(), "content-type": "multipart/form-data; boundary=x", "content-length": str(8 * 1024 * 1024)},
+        headers={
+            **bearer(),
+            "content-type": "multipart/form-data; boundary=x",
+            "content-length": str(4 * 1024 * 1024 + 70 * 1024),
+        },
     )
     assert r.status_code == 413 and r.json()["error"]["code"] == "audio_too_large"
 
@@ -174,10 +199,17 @@ def test_uploads_stay_in_memory_and_never_spill_to_disk(settings, monkeypatch):
 def test_streamed_bodies_without_a_length_are_cut_off_at_the_cap(settings):
     def chunks():  # noqa: ANN202
         yield b'--x\r\nContent-Disposition: form-data; name="file"; filename="r.png"\r\nContent-Type: image/png\r\n\r\n'
-        for _ in range(8):
+        for _ in range(5):
             yield b"0" * (1024 * 1024)
         yield b"\r\n--x--\r\n"
 
     vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
     r = client(vision).post("/receipt", content=chunks(), headers={**bearer(), "content-type": "multipart/form-data; boundary=x"})
     assert r.status_code == 413 and r.json()["error"]["code"] == "image_too_large"
+
+
+def test_the_vercel_entrypoint_serves_the_same_app():
+    import index
+    from coinflow_agent import main
+
+    assert index.app is main.app
