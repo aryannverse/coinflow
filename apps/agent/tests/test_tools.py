@@ -1,5 +1,14 @@
+from types import SimpleNamespace
+
+import pytest
+
 from coinflow_agent.tools.propose import PayerArg, draft_event, draft_expense, draft_group_expense, draft_settle_reminder
+from coinflow_agent.tools.read import get_group, get_group_balances
 from tests.fake_api import ASHA, FOOD, GROUP, ME, RAVI
+
+
+def bad_runtime(ctx):  # noqa: ANN001, ANN201
+    return SimpleNamespace(context=ctx)
 
 
 async def test_expense_proposal_is_the_exact_api_body(ctx):
@@ -92,3 +101,28 @@ async def test_event_leaves_me_out_of_the_placeholders(ctx):
     _, p = await draft_event(ctx, name="Goa", starts_on="2026-11-01", ends_on="2026-11-04", people=["me", "Asha", "Ravi"])
     assert p is not None
     assert p["payload"]["placeholders"] == [{"displayName": "Asha"}, {"displayName": "Ravi"}]
+
+
+async def test_a_two_word_name_never_falls_back_to_a_first_name(ctx):
+    ctx.group_id = GROUP
+    text, p = await draft_group_expense(ctx, description="Cab", amount_rupees="300", participants=["me", "Ravi Sharma"])
+    assert p is None and "couldn't find “Ravi Sharma”" in text and "Ravi" in text
+    _, ok = await draft_group_expense(ctx, description="Cab", amount_rupees="300", participants=["me", "Ravi"])
+    assert ok is not None and ok["payload"]["split"]["memberIds"] == [ME, RAVI]
+
+
+@pytest.mark.parametrize("bad", ["../me", "../../internal/coach/digest", f"{GROUP}?x=1", f"{GROUP}/../me", "not-a-uuid"])
+async def test_a_group_id_that_is_not_a_uuid_is_refused_before_any_request(ctx, fake_api, bad):
+    text, p = await draft_group_expense(ctx, description="Cab", amount_rupees="300", group_id=bad)
+    assert p is None and "group" in text.lower()
+    text, p = await draft_settle_reminder(ctx, member_name="Asha", group_id=bad)
+    assert p is None and "group" in text.lower()
+    assert "group" in (await get_group.coroutine(bad_runtime(ctx), group_id=bad)).lower()
+    assert "group" in (await get_group_balances.coroutine(bad_runtime(ctx), group_id=bad)).lower()
+    assert fake_api.requests == []
+
+
+async def test_the_user_client_refuses_paths_that_could_escape_the_read_list(ctx):
+    for path in ("/groups/../me", "/groups/x?y=1", "/groups/x#y", "/groups/%2e%2e/me", "/groups\\..\\me"):
+        with pytest.raises(ValueError):
+            await ctx.api.get(path)

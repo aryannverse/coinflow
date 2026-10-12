@@ -2,16 +2,18 @@ import re
 from decimal import Decimal
 
 MAX_PAISE = 1_000_000_000  # ₹1,00,00,000, same cap as the web app
-_PLAIN = re.compile(r"\d+(\.\d{1,2})?")
+# Plain digits, en-IN grouping (12,34,567) or international grouping (1,234,567): commas only where they belong.
+_AMOUNT = re.compile(r"(?:\d+|\d{1,2}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?")
+_PREFIX = re.compile(r"(?:₹|Rs\.?|INR)?\s*")
 
 
 def parse_rupees_to_paise(text: str | int | float) -> int | None:
     """'₹1,250.50' → 125050. Anything that isn't a plain amount ('1.5k', '2 lakh', '12.345') → None, so the agent asks."""
-    cleaned = re.sub(r"[₹,\s]", "", str(text))
-    for prefix in ("Rs.", "Rs", "INR"):
-        cleaned = cleaned.removeprefix(prefix)
-    if not _PLAIN.fullmatch(cleaned):
+    raw = str(text).strip()
+    cleaned = raw[_PREFIX.match(raw).end() :]  # a currency marker may be followed by a space; digits never contain one
+    if not _AMOUNT.fullmatch(cleaned):
         return None
+    cleaned = cleaned.replace(",", "")
     paise = int(Decimal(cleaned) * 100)
     return paise if 0 < paise <= MAX_PAISE else None
 

@@ -74,3 +74,23 @@ async def test_a_slow_model_becomes_a_friendly_timeout(ctx):
         {"code": "llm_timeout", "message": "That took longer than a minute, so I stopped. Please try again."},
     ) in events
     assert events[-1][0] == "done"
+
+
+async def test_a_timeout_mid_tool_does_not_break_the_thread(ctx):
+    class SlowPlanner(ScriptedChatModel):
+        async def _agenerate(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            await asyncio.sleep(5)
+            raise AssertionError("unreachable")
+
+    main = ScriptedChatModel(script=[call("plan_event", {"request": "plan a trip"}), say("Back again.")])
+    agent = build_agent(main, InMemorySaver(), planner_model=SlowPlanner(script=[]))
+    first = await run(agent, ctx, "plan a trip", timeout_s=0.5)
+    assert any(e == "error" and d["code"] == "llm_timeout" for e, d in first)
+    second = await run(agent, ctx, "hello again")
+    assert not any(e == "error" for e, _ in second)
+    assert "".join(d["text"] for e, d in second if e == "token") == "Back again."
+    # What the endpoint sees on turn two: every tool call has an answer, or an OpenAI-compatible API answers 400.
+    sent = main.seen[-1]
+    answered = {m.tool_call_id for m in sent if m.type == "tool"}
+    asked = {tc["id"] for m in sent if m.type == "ai" for tc in m.tool_calls}
+    assert asked and asked <= answered

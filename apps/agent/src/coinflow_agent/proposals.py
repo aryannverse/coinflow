@@ -1,6 +1,7 @@
 """Typed proposals (spec §4.4). Each payload is exactly the request body of the Coinflow endpoint that saves it, so
 Next re-validates it with the API's own Zod schemas before the user sees it. camelCase on purpose: it is the wire format."""
 
+import re
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -9,9 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field
 MAX = 1_000_000_000
 Paise = Annotated[int, Field(ge=1, le=MAX)]
 PaiseOrZero = Annotated[int, Field(ge=0, le=MAX)]
-Uuid = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
+UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+Uuid = Annotated[str, Field(pattern=UUID_PATTERN)]
 IsoDate = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
 Name = Annotated[str, Field(min_length=1, max_length=60)]
+
+
+def is_uuid(value: object) -> bool:
+    """Ids that come from tool arguments are written into URL paths, so only a real UUID may pass."""
+    return isinstance(value, str) and re.fullmatch(UUID_PATTERN[1:-1], value) is not None
 
 
 class Strict(BaseModel):

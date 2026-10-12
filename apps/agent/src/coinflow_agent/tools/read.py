@@ -9,6 +9,9 @@ from langgraph.prebuilt import ToolRuntime
 from ..api_client import ApiError
 from ..context import AgentContext
 from ..money import format_inr
+from ..proposals import is_uuid
+
+BAD_GROUP = "That group id isn't valid. Call list_groups for the real ids, then ask the user which group."
 
 
 def dump(data: object) -> str:
@@ -183,6 +186,8 @@ async def get_group(runtime: ToolRuntime[AgentContext], group_id: str | None = N
     gid = group_id or runtime.context.group_id
     if not gid:
         return "Which group? Call list_groups and ask the user if it's unclear."
+    if not is_uuid(gid):
+        return BAD_GROUP
     body, err = await fetch(runtime.context, f"/groups/{gid}")
     if err:
         return err
@@ -206,6 +211,8 @@ async def get_group_balances(runtime: ToolRuntime[AgentContext], group_id: str |
     gid = group_id or runtime.context.group_id
     if not gid:
         return "Which group? Call list_groups and ask the user if it's unclear."
+    if not is_uuid(gid):
+        return BAD_GROUP
     group, err = await fetch(runtime.context, f"/groups/{gid}")
     if err:
         return err

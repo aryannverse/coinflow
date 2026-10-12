@@ -13,7 +13,10 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel, Field
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.formparsers import MultiPartParser
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import receipt as receipt_mod
 from . import speech
@@ -30,9 +33,65 @@ from .stream import chat_events
 log = logging.getLogger("coinflow.agent")
 MAX_AUDIO_BYTES = 6 * 1024 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024  # spec §4.5
+MULTIPART_OVERHEAD = 64 * 1024
+# Starlette spools multipart files to a temp file on disk above 1 MB. Audio is memory-only and receipts are never stored
+# (spec §4.5), so keep every allowed upload in memory: the cap is enforced before parsing, below.
+MultiPartParser.spool_max_size = MAX_AUDIO_BYTES + MULTIPART_OVERHEAD
+TOO_BIG = {
+    "/stt": (MAX_AUDIO_BYTES, "audio_too_large", "That recording is too big. Keep voice notes under 30 seconds."),
+    "/receipt": (MAX_IMAGE_BYTES, "image_too_large", "That photo is over 5 MB. Try a closer, smaller shot."),
+}
 AUDIO_TYPES = {"audio/webm", "audio/ogg", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4"}
 ThreadId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 User = Annotated[str, Depends(require_user)]
+
+
+class _TooBig(Exception):
+    pass
+
+
+class UploadLimit:
+    """Refuses oversize uploads before Starlette parses (or spools) the multipart body: by Content-Length, and by counting
+    streamed bytes when there is none."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        rule = TOO_BIG.get(scope["path"]) if scope["type"] == "http" and scope["method"] == "POST" else None
+        if rule is None:
+            await self.app(scope, receive, send)
+            return
+        limit, code, message = rule
+        cap = limit + MULTIPART_OVERHEAD
+        declared = Headers(scope=scope).get("content-length", "")
+        refuse = err(413, code, message)
+        if declared.isdigit() and int(declared) > cap:
+            await refuse(scope, receive, send)
+            return
+        seen = 0
+        exceeded = False
+
+        async def counting_receive() -> dict:
+            nonlocal seen, exceeded
+            message_ = await receive()
+            if message_["type"] == "http.request":
+                seen += len(message_.get("body", b""))
+                if seen > cap:
+                    exceeded = True
+                    raise _TooBig
+            return message_
+
+        async def mute_after_exceeded(message_: dict) -> None:
+            if not exceeded:  # FastAPI turns the abort into its own 400; swallow it so the 413 below is what the client sees
+                await send(message_)
+
+        try:
+            await self.app(scope, counting_receive, mute_after_exceeded)
+        except _TooBig:
+            pass
+        if exceeded:
+            await refuse(scope, receive, send)
 
 
 def err(status: int, code: str, message: str) -> JSONResponse:
@@ -103,6 +162,7 @@ def create_app(settings: Settings | None = None, *, agent=None, api_transport=No
     app.state.agent = agent
     app.state.api_transport = api_transport
     app.state.start_coach = start_coach
+    app.add_middleware(UploadLimit)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(_req: Request, exc: StarletteHTTPException) -> JSONResponse:

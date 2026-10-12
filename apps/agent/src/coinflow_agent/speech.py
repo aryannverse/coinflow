@@ -38,7 +38,34 @@ def _whisper_model(settings: Settings):  # noqa: ANN202
         return _whisper
 
 
+def probe_seconds(data: bytes) -> float | None:
+    """Clip length from the container, without decoding any audio. None when it can't be told (then the decoded length decides)."""
+    try:
+        import av
+    except ImportError:
+        return None
+    try:
+        with av.open(io.BytesIO(data)) as container:
+            if container.duration:
+                return container.duration / av.time_base
+            stream = next((s for s in container.streams if s.type == "audio"), None)
+            if stream is None:
+                return None
+            if stream.duration and stream.time_base:
+                return float(stream.duration * stream.time_base)
+            end = 0.0  # no duration header (MediaRecorder webm): add up packet timestamps, still without decoding
+            for packet in container.demux(stream):
+                if packet.pts is not None and packet.time_base:
+                    end = max(end, float((packet.pts + (packet.duration or 0)) * packet.time_base))
+            return end or None
+    except Exception:
+        return None
+
+
 def transcribe_bytes(data: bytes, settings: Settings) -> str:
+    seconds = probe_seconds(data)
+    if seconds is not None and seconds > MAX_SECONDS:
+        raise AudioTooLong()  # refused before a single frame is decoded (spec §4.5: clips up to 30 s)
     from faster_whisper import decode_audio
 
     audio = decode_audio(io.BytesIO(data), sampling_rate=SAMPLE_RATE)

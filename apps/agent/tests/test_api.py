@@ -131,3 +131,53 @@ def test_receipt_parses_with_a_fake_vision_model(settings, monkeypatch):
 def test_receipt_refuses_non_images_and_big_files(settings, body, status):
     vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
     assert client(vision).post("/receipt", files={"file": ("r.png", body, "image/png")}, headers=bearer()).status_code == status
+
+
+def test_oversize_content_length_is_refused_before_the_body_is_parsed(settings, monkeypatch):
+    vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
+
+    def never(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("the multipart body must not be parsed")
+
+    monkeypatch.setattr("starlette.requests.Request._get_form", never)
+    c = client(vision)
+    r = c.post(
+        "/receipt",
+        content=b"x" * 64,
+        headers={**bearer(), "content-type": "multipart/form-data; boundary=x", "content-length": str(6 * 1024 * 1024)},
+    )
+    assert r.status_code == 413 and r.json() == {
+        "error": {"code": "image_too_large", "message": "That photo is over 5 MB. Try a closer, smaller shot."}
+    }
+    r = c.post(
+        "/stt",
+        content=b"x" * 64,
+        headers={**bearer(), "content-type": "multipart/form-data; boundary=x", "content-length": str(8 * 1024 * 1024)},
+    )
+    assert r.status_code == 413 and r.json()["error"]["code"] == "audio_too_large"
+
+
+def test_uploads_stay_in_memory_and_never_spill_to_disk(settings, monkeypatch):
+    from tempfile import SpooledTemporaryFile
+
+    def no_disk(self):  # noqa: ANN001, ANN202
+        raise AssertionError("an upload was spooled to disk")
+
+    monkeypatch.setattr(SpooledTemporaryFile, "rollover", no_disk)
+    monkeypatch.setattr(speech, "stt_available", lambda: True)
+    monkeypatch.setattr(speech, "transcribe_bytes", lambda data, s: str(len(data)))
+    big = b"\x1aE\xdf\xa3" + b"0" * (3 * 1024 * 1024)
+    r = client(settings).post("/stt", files={"file": ("a.webm", big, "audio/webm")}, headers=bearer())
+    assert r.json() == {"text": str(len(big))}
+
+
+def test_streamed_bodies_without_a_length_are_cut_off_at_the_cap(settings):
+    def chunks():  # noqa: ANN202
+        yield b'--x\r\nContent-Disposition: form-data; name="file"; filename="r.png"\r\nContent-Type: image/png\r\n\r\n'
+        for _ in range(8):
+            yield b"0" * (1024 * 1024)
+        yield b"\r\n--x--\r\n"
+
+    vision = settings.model_copy(update={"llm_base_url": "http://llm.test/v1", "llm_vision_model": "vision"})
+    r = client(vision).post("/receipt", content=chunks(), headers={**bearer(), "content-type": "multipart/form-data; boundary=x"})
+    assert r.status_code == 413 and r.json()["error"]["code"] == "image_too_large"

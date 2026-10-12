@@ -27,8 +27,10 @@ from ..proposals import (
     SharesEntry,
     SharesSplit,
     TxnPayload,
+    is_uuid,
     make_proposal,
 )
+from .read import BAD_GROUP
 
 Result = tuple[str, dict | None]
 SELF = {"me", "i", "myself", "mine"}
@@ -85,7 +87,9 @@ def member_finder(members: list[dict]):
         exact = [m for m in members if m["displayName"].lower() == n]
         if len(exact) == 1:
             return exact[0]
-        first = [m for m in members if n and m["displayName"].lower().split()[0] == n.split()[0]]
+        # A first name may stand for a member ("Ravi" → "Ravi Sharma"), but a full name must match exactly:
+        # "Ravi Sharma" must never quietly become a different Ravi.
+        first = [m for m in members if n and len(n.split()) == 1 and m["displayName"].lower().split()[0] == n]
         if len(first) == 1:
             return first[0]
         known = ", ".join(m["displayName"] for m in members)
@@ -197,6 +201,8 @@ async def draft_group_expense(
         gid = group_id or ctx.group_id
         if not gid:
             raise NeedsInfo("Which group is this for? Call list_groups, then ask the user if it's unclear.")
+        if not is_uuid(gid):
+            raise NeedsInfo(BAD_GROUP)
         total = paise_of(amount_rupees)
         group = (await ctx.api.get(f"/groups/{gid}"))["data"]
         members = [m for m in group["members"] if not m.get("removedAt")]
@@ -292,6 +298,8 @@ async def draft_settle_reminder(
         gid = group_id or ctx.group_id
         if not gid:
             raise NeedsInfo("Which group is the reminder for? Call list_groups, then ask the user.")
+        if not is_uuid(gid):
+            raise NeedsInfo(BAD_GROUP)
         group = (await ctx.api.get(f"/groups/{gid}"))["data"]
         members = [m for m in group["members"] if not m.get("removedAt")]
         who = member_finder(members)(member_name)

@@ -39,7 +39,8 @@ class CoinflowClient:
         self._http = httpx.AsyncClient(base_url=f"{base_url.rstrip('/')}/api/v1", transport=transport, timeout=timeout)
 
     async def get(self, path: str, params: dict[str, object] | None = None) -> dict:
-        if not path.startswith(READ_PREFIXES):
+        # The allow-list is checked on the raw string and again after httpx normalises it, so '/groups/../me' can't escape.
+        if not path.startswith(READ_PREFIXES) or any(c in path for c in ("..", "?", "#", "%", "\\")):
             raise ValueError(f"{path} is not a read endpoint the agent may call")
         token = sign_token(self._secret, self._user_id)
         query = {k: v for k, v in (params or {}).items() if v is not None}

@@ -4,6 +4,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
 from langchain.agents import create_agent
 from langchain.agents.middleware import ModelRequest, dynamic_prompt
 
@@ -37,12 +38,14 @@ def coinflow_prompt(request: ModelRequest) -> str:
     )
 
 
+# A timeout or crash mid-tool leaves an AIMessage whose tool calls have no answer in the checkpoint, and every later turn on
+# that thread would be rejected by OpenAI-compatible endpoints. PatchToolCallsMiddleware answers them with a 'cancelled' ToolMessage.
 def build_agent(model, checkpointer, *, planner_model=None):  # noqa: ANN001, ANN201
     plan_event = make_plan_tool(build_planner(planner_model or model))
     return create_agent(
         model,
         [*READ_TOOLS, *PROPOSAL_TOOLS, plan_event],
-        middleware=[coinflow_prompt],
+        middleware=[PatchToolCallsMiddleware(), coinflow_prompt],
         context_schema=AgentContext,
         checkpointer=checkpointer,
     )
