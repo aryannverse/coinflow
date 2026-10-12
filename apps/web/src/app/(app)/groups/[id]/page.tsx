@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
-import { GroupView, GROUP_TABS, type GroupTab } from '@/components/groups/group-view'
+import { GroupView } from '@/components/groups/group-view'
 import type { GroupDetailDTO, GroupExpenseDTO, Page } from '@/lib/api-types'
+import { groupTab } from '@/lib/group-display'
 import { uuid } from '@/lib/schemas/common'
 import { requireCurrentUser } from '@/server/auth'
 import { AppError } from '@/server/errors'
@@ -24,6 +25,6 @@ export default async function GroupPage({ params, searchParams }: { params: Prom
     throw err
   })
   const expenses = await listGroupExpenses(user.id, id, { limit: 50 })
-  const initialTab: GroupTab = GROUP_TABS.includes(tab as GroupTab) ? (tab as GroupTab) : 'expenses'
+  const initialTab = groupTab(tab)
   return <GroupView initial={json<GroupDetailDTO>(detail)} initialExpenses={json<Page<GroupExpenseDTO>>(expenses)} initialTab={initialTab} />
 }

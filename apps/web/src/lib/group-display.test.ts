@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { dateRange, initials, paymentHeadline, positionCopy, timeAgo } from './group-display'
+import { dateRange, groupTab, initials, paymentHeadline, positionCopy, timeAgo } from './group-display'
 
 describe('group display', () => {
+  it('?tab= resolves to a known tab, else the fallback', () => {
+    expect(groupTab('balances')).toBe('balances')
+    expect(groupTab('members', 'balances')).toBe('members')
+    expect(groupTab(undefined)).toBe('expenses')
+    expect(groupTab('nope', 'activity')).toBe('activity')
+  })
   it('position copy is neutral in every direction', () => {
     expect(positionCopy(200_000)).toEqual({ text: 'You’re owed ₹2,000', tone: 'owed' })
     expect(positionCopy(-60_000)).toEqual({ text: 'You owe ₹600', tone: 'owe' })

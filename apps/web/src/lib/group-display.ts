@@ -2,6 +2,18 @@ import { formatISODate, type ISODate } from './dates'
 import { formatINR } from './money'
 import type { Payment } from './settle'
 
+/**
+ * The group page's tabs, kept in `?tab=`. They live here, not in the client GroupView: a server page that imports a
+ * value from a 'use client' module gets a client reference, not the array (`GROUP_TABS.includes is not a function`).
+ */
+export const GROUP_TABS = ['expenses', 'balances', 'activity', 'members'] as const
+export type GroupTab = (typeof GROUP_TABS)[number]
+
+/** `?tab=` → a known tab, else `fallback` (Expenses). */
+export function groupTab(value: string | null | undefined, fallback: GroupTab = 'expenses'): GroupTab {
+  return GROUP_TABS.find((t) => t === value) ?? fallback
+}
+
 export function positionCopy(paise: number): { text: string; tone: 'owed' | 'owe' | 'settled' } {
   if (paise > 0) return { text: `You’re owed ${formatINR(paise)}`, tone: 'owed' }
   if (paise < 0) return { text: `You owe ${formatINR(-paise)}`, tone: 'owe' }

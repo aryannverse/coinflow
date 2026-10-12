@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useGroup } from '@/hooks/group-queries'
 import type { GroupDetailDTO, GroupExpenseDTO, Page } from '@/lib/api-types'
-import { dateRange, positionCopy } from '@/lib/group-display'
+import { dateRange, GROUP_TABS, groupTab, positionCopy, type GroupTab } from '@/lib/group-display'
 import { cn } from '@/lib/utils'
 import { ActivityTab } from './activity-tab'
 import { BalancesTab } from './balances-tab'
@@ -15,8 +15,6 @@ import { useGroupSheets } from './group-sheets'
 import { MemberAvatar } from './member-avatar'
 import { MembersTab } from './members-tab'
 
-export const GROUP_TABS = ['expenses', 'balances', 'activity', 'members'] as const
-export type GroupTab = (typeof GROUP_TABS)[number]
 const LABEL: Record<GroupTab, string> = { expenses: 'Expenses', balances: 'Balances', activity: 'Activity', members: 'Members' }
 const TONE = { owed: 'text-primary', owe: 'text-neutral-negative', settled: 'text-muted-foreground' } as const
 const STACK = 5
@@ -28,7 +26,7 @@ export function GroupView({ initial, initialExpenses, initialTab }: { initial: G
   // The URL is the only copy of the tab: a same-group navigation to another ?tab= (a bell link to Balances, or
   // `?tab=expenses#expense-…`) switches it, and so does Back. `initialTab` covers the server render.
   const params = useSearchParams()
-  const tab: GroupTab = GROUP_TABS.find((t) => t === params.get('tab')) ?? initialTab
+  const tab: GroupTab = groupTab(params.get('tab'), initialTab)
   const active = group.members.filter((m) => !m.removedAt)
   const waiting = active.filter((m) => !m.claimed).length
   const range = dateRange(group.startsOn, group.endsOn)
