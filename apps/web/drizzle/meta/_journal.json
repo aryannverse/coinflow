@@ -22,6 +22,20 @@
       "when": 1791738164471,
       "tag": "0002_recurring_draft_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791795476406,
+      "tag": "0003_groups_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791795481503,
+      "tag": "0004_settle_up_categories",
+      "breakpoints": true
     }
   ]
 }

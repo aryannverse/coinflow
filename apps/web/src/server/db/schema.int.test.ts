@@ -7,9 +7,21 @@ import { categories, transactions } from './schema'
 describe('schema', () => {
   beforeEach(resetDb)
 
-  it('ships 19 built-in categories', async () => {
+  it('ships 21 built-in categories, two of them system-only', async () => {
     const rows = await getDb().select().from(categories).where(isNull(categories.userId))
-    expect(rows).toHaveLength(19)
+    expect(rows).toHaveLength(21)
+    expect(rows.filter((r) => r.system).map((r) => `${r.name}/${r.kind}`).sort()).toEqual(['Settle up received/income', 'Settle up/expense'])
+  })
+
+  it('allows a zero-cash expense only for a group mirror', async () => {
+    const user = await makeUser()
+    const food = await builtinCategory('Food & Dining')
+    await expect(
+      getDb().insert(transactions).values({
+        userId: user.id, type: 'expense', amount: 0, personalShare: 30_000, source: 'group',
+        categoryId: food.id, occurredAt: new Date(),
+      }),
+    ).resolves.toBeDefined()
   })
 
   it('rejects non-positive amounts', async () => {
