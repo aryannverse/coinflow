@@ -164,8 +164,10 @@ export function MicButton({ available }: { available: boolean }) {
       >
         <Mic className="size-5" aria-hidden />
       </button>
+      {/* Above and to the RIGHT of the mic: the status line ("Listening…") sits above the camera and mic, and a meter
+          centred over the mic covered its end. */}
       {recording && (
-        <div aria-hidden className="absolute -top-8 flex h-6 items-center gap-0.5 rounded-full bg-popover px-2 shadow">
+        <div aria-hidden data-mic-meter className="absolute -top-8 left-full ml-2 flex h-6 items-center gap-0.5 rounded-full bg-popover px-2 shadow">
           {reduced ? (
             <span className="h-1.5 w-14 overflow-hidden rounded-full bg-surface-2"><span className="block h-full bg-primary" style={{ width: `${Math.round(level * 100)}%` }} /></span>
           ) : (
