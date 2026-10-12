@@ -15,7 +15,7 @@
 - **Editing rights.** Any signed-in, claimed member can add, edit or delete any expense in the group.
 - **Settling up.** Settle-up shows the payee's UPI QR. The payer marks it paid, and the recipient confirms or rejects through a notification. No money moves through the site.
 - **Agentic AI.** LangGraph plus Deep Agents, running in a separate Python service.
-  - **Model:** any OpenAI-compatible model the user configures.
+  - **Model:** any OpenAI-compatible model the user configures. The project uses **Groq** (user decision, 2026-10-12: "forget CLI, we will use groq API key now"); see §4.1.
   - **Receipts:** read by a vision LLM.
   - **Speech:** speech-to-text with faster-whisper, text-to-speech with Kokoro.
   - **Jobs:** conversational and voice logging, Q&A and insights, trip/event planning, and a proactive coach.
@@ -261,6 +261,10 @@ Added at the user's request after the plan was written: "anyone logged in can be
 
 LLM configuration:
 - `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` select an OpenAI-compatible chat model.
+- **Provider: Groq.** `LLM_BASE_URL=https://api.groq.com/openai/v1` with the user's Groq API key (`gsk_…`, kept only in `apps/agent/.env`).
+  - Chat, tools and the planner use `openai/gpt-oss-120b`, a production model with tool use and strict `json_schema` output.
+  - Receipts use `qwen/qwen3.8-27b`, Groq's vision model. It is a preview model that supports strict `json_schema`, takes at most 3 images per request, and counts each image as 2,048 tokens.
+  - Groq replaces the earlier CLI-proxy idea. Nothing in the code is Groq-specific, so any OpenAI-compatible endpoint still works.
 - `LLM_VISION_MODEL` is optional. When it is unset, receipt scan returns `vision_unavailable`.
 - The agent's health endpoint reports which capabilities are available.
 
