@@ -108,7 +108,7 @@ function FindFriend() {
 
   return (
     <section aria-labelledby="find-h" className={CARD}>
-      <h2 id="find-h" className={H2}>Find a friend</h2>
+      <h2 id="find-h" tabIndex={-1} className={H2}>Find a friend</h2>
       <form role="search" aria-label="Find a friend" noValidate className="mt-3 flex flex-col gap-1.5"
         onSubmit={(e) => {
           e.preventDefault()
@@ -143,11 +143,14 @@ function Requests({ data }: { data: FriendsDTO }) {
   const focus = useFocusAfterRemoval(rows.map((r) => r.requestId))
   if (rows.length === 0) return null
 
-  /** After this row goes: the next row's first button, else the heading. */
-  const armFor = (requestId: string) => {
+  /**
+   * After this row goes: the next row's first button. If it was the last request this whole card unmounts, so fall
+   * back to a heading that stays: "Your friends" after an accept (that is where they now appear), else "Find a friend".
+   */
+  const armFor = (requestId: string, accepted: boolean) => {
     const i = rows.findIndex((r) => r.requestId === requestId)
     const next = rows[i + 1] ?? rows[i - 1]
-    focus.arm(requestId, next ? `[data-request="${next.requestId}"] button` : null, 'requests-h')
+    focus.arm(requestId, next ? `[data-request="${next.requestId}"] button` : null, next ? 'requests-h' : accepted ? 'friends-h' : 'find-h')
   }
 
   return (
@@ -161,7 +164,7 @@ function Requests({ data }: { data: FriendsDTO }) {
                 <Button aria-label={`Accept ${r.name}`} aria-disabled={accept.isPending || undefined} className={BTN}
                   onClick={() => {
                     if (accept.isPending) return
-                    armFor(r.requestId)
+                    armFor(r.requestId, true)
                     accept.mutate({ requestId: r.requestId, name: r.name }, { onError: focus.disarm })
                   }}>
                   <Check className="size-4" aria-hidden /> Accept
@@ -169,7 +172,7 @@ function Requests({ data }: { data: FriendsDTO }) {
                 <Button variant="outline" aria-label={`Decline ${r.name}`} aria-disabled={drop.isPending || undefined} className={BTN}
                   onClick={() => {
                     if (drop.isPending) return
-                    armFor(r.requestId)
+                    armFor(r.requestId, false)
                     drop.mutate({ requestId: r.requestId, label: 'Request declined' }, { onError: focus.disarm })
                   }}>
                   Decline
@@ -180,7 +183,7 @@ function Requests({ data }: { data: FriendsDTO }) {
                 <Button variant="outline" aria-label={`Cancel request to ${r.name}`} aria-disabled={drop.isPending || undefined} className={BTN}
                   onClick={() => {
                     if (drop.isPending) return
-                    armFor(r.requestId)
+                    armFor(r.requestId, false)
                     drop.mutate({ requestId: r.requestId, label: 'Request cancelled' }, { onError: focus.disarm })
                   }}>
                   Cancel

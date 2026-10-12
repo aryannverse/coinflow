@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dateRange, initials, paymentHeadline, positionCopy } from './group-display'
+import { dateRange, initials, paymentHeadline, positionCopy, timeAgo } from './group-display'
 
 describe('group display', () => {
   it('position copy is neutral in every direction', () => {
@@ -22,5 +22,12 @@ describe('group display', () => {
     const p = { from: 'a', to: 'y', amountPaise: 20_000, why: { debtorOwesPaise: 0, debtorExpenses: [], splitAcross: [] } }
     expect(paymentHeadline(p, names, 'y')).toBe('Asha pays you ₹200')
     expect(paymentHeadline(p, names, 'a')).toBe('You pay Yash ₹200')
+  })
+  it('time ago is short, then a date (bell and activity share it)', () => {
+    const now = Date.parse('2026-10-12T12:00:00.000Z')
+    expect(timeAgo('2026-10-12T11:59:40.000Z', now)).toBe('just now')
+    expect(timeAgo('2026-10-12T11:55:00.000Z', now)).toBe('5 min ago')
+    expect(timeAgo('2026-10-12T09:00:00.000Z', now)).toBe('3 h ago')
+    expect(timeAgo('2026-10-10T09:00:00.000Z', now)).toBe('10 Oct')
   })
 })

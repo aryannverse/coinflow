@@ -2,8 +2,10 @@
 import { cn } from '@/lib/utils'
 
 /** Compact ₹ field for rows (payers, exact, items). The label is always present; visually hidden when `hideLabel`. */
-export function MoneyInput({ id, label, value, onChange, invalid, hideLabel = true, className }: {
-  id: string; label: string; value: string; onChange: (v: string) => void; invalid?: boolean; hideLabel?: boolean; className?: string
+export function MoneyInput({ id, label, value, onChange, invalid, describedBy, hideLabel = true, className }: {
+  id: string; label: string; value: string; onChange: (v: string) => void; invalid?: boolean
+  /** Id of the inline error (or hint) this field is described by. */
+  describedBy?: string; hideLabel?: boolean; className?: string
 }) {
   return (
     <div className={cn('flex flex-col', className)}>
@@ -12,7 +14,7 @@ export function MoneyInput({ id, label, value, onChange, invalid, hideLabel = tr
         <span aria-hidden className="amount text-muted-foreground">₹</span>
         <input
           id={id} inputMode="decimal" autoComplete="off" value={value} placeholder="0"
-          aria-invalid={invalid || undefined}
+          aria-invalid={invalid || undefined} aria-describedby={describedBy}
           onChange={(e) => onChange(e.target.value.replace(/[^\d.,]/g, ''))}
           className="amount min-h-12 w-20 min-w-0 flex-1 bg-transparent text-right outline-none placeholder:text-muted-foreground/50"
         />

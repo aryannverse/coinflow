@@ -31,10 +31,11 @@ const MODES: { value: SplitMode; label: string }[] = [
   { value: 'percent', label: 'Percent' },
   { value: 'itemized', label: 'Itemized' },
 ]
-/** Field → what to focus so the error is announced in context. */
-const FOCUS: [string, string][] = [
-  ['amountPaise', '#ge-amount'], ['description', '#ge-desc'], ['categoryId', '[role="radio"][tabindex="0"]'],
-  ['payers', '#ge-payers input, #ge-payers [role="radio"]'], ['split', '#ge-split'],
+/** Field → what to focus (first match wins) so the error is announced in context. */
+const FOCUS: [string, string[]][] = [
+  ['amountPaise', ['#ge-amount']], ['description', ['#ge-desc']], ['categoryId', ['[role="radio"][tabindex="0"]']],
+  ['payers', ['#ge-payers [aria-invalid="true"]', '#ge-payers [role="radio"][tabindex="0"]']],
+  ['split', ['#ge-split [aria-invalid="true"]', '#ge-split [data-invalid]', '#ge-split']],
 ]
 type FieldError = { field: string; message: string }
 
@@ -69,8 +70,13 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
 
   function fail(e: FieldError) {
     setFieldError(e)
-    const target = FOCUS.find(([prefix]) => e.field.startsWith(prefix))?.[1]
-    if (target) formRef.current?.querySelector<HTMLElement>(target)?.focus()
+    const targets = FOCUS.find(([prefix]) => e.field.startsWith(prefix))?.[1] ?? []
+    // After the error renders, so the invalid field (and what describes it) is what gets focus.
+    requestAnimationFrame(() => {
+      const form = formRef.current
+      const el = targets.map((t) => form?.querySelector<HTMLElement>(t)).find(Boolean)
+      el?.focus()
+    })
   }
 
   async function save() {
@@ -163,9 +169,10 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
           </ToggleGroup>
         </div>
 
-        <div id="ge-split" tabIndex={-1} className="outline-none">
+        {/* Named so that when a failed save lands focus here, it is announced with the error. */}
+        <div id="ge-split" tabIndex={-1} role="group" aria-label="Split details" aria-describedby={errorFor('split') ? 'ge-split-error' : undefined} className="outline-none">
           {draft.mode === 'itemized'
-            ? <ReceiptCanvas members={active} draft={draft} preview={preview} error={errorFor('split')} onChange={patch} />
+            ? <ReceiptCanvas members={active} draft={draft} preview={preview} error={errorFor('split')} errorField={fieldError?.field} onChange={patch} />
             : <SplitEditor members={active} draft={draft} preview={preview} error={errorFor('split')} onChange={patch} />}
         </div>
         {errorFor('form') && <p role="alert" className="text-sm text-neutral-negative">{errorFor('form')}</p>}

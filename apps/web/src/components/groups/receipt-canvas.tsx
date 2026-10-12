@@ -14,9 +14,17 @@ const nameOf = (m: GroupMemberDTO) => (m.isMe ? 'You' : m.displayName)
 const paiseOf = (t: string) => parseRupeesToPaise(t.trim() || '0') ?? 0
 const itemAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-item-key]')?.dataset.itemKey ?? null
 
-export function ReceiptCanvas({ members, draft, preview, error, onChange }: {
-  members: GroupMemberDTO[]; draft: ExpenseDraft; preview: Preview; error: string | null; onChange: (patch: Partial<ExpenseDraft>) => void
+/**
+ * `error` / `errorField` come only from a save attempt (typing clears them). The message is a role="alert" with id
+ * `ge-split-error`; the field it names (an item's price or people, or tax / tip / discount) is marked invalid
+ * (`data-invalid` is what the sheet focuses) and described by it.
+ */
+export function ReceiptCanvas({ members, draft, preview, error, errorField, onChange }: {
+  members: GroupMemberDTO[]; draft: ExpenseDraft; preview: Preview; error: string | null; errorField?: string | null
+  onChange: (patch: Partial<ExpenseDraft>) => void
 }) {
+  const errId = error ? 'ge-split-error' : undefined
+  const bad = (field: string) => Boolean(error && errorField && (errorField === field || errorField.startsWith(`${field}.`)))
   const [drag, setDrag] = useState<{ memberId: string; x: number; y: number } | null>(null)
   const [hoverKey, setHoverKey] = useState<string | null>(null)
   const items = draft.items
@@ -32,7 +40,7 @@ export function ReceiptCanvas({ members, draft, preview, error, onChange }: {
   const dragged = members.find((m) => m.id === drag?.memberId)
   const line = unassigned > 0
     ? `Unassigned ${formatINR(unassigned)}`
-    : (error ?? preview.error?.message ?? `Items ${formatINR(itemsTotal)} · tax, tip and discount follow what each person had.`)
+    : (preview.error?.message ?? `Items ${formatINR(itemsTotal)} · tax, tip and discount follow what each person had.`)
 
   return (
     <div className="flex flex-col gap-3">
@@ -88,17 +96,20 @@ export function ReceiptCanvas({ members, draft, preview, error, onChange }: {
                     onChange={(e) => setItems(items.map((x) => (x.key === it.key ? { ...x, name: e.target.value } : x)))} />
                 </div>
                 <MoneyInput id={`ge-item-${it.key}`} label={`Price of ${label}`} value={it.amount}
+                  invalid={bad(`split.items.${i}.amountPaise`)} describedBy={bad(`split.items.${i}.amountPaise`) ? errId : undefined}
                   onChange={(v) => setItems(items.map((x) => (x.key === it.key ? { ...x, amount: v } : x)))} />
                 <Button type="button" variant="ghost" aria-label={`Remove ${label}`} className="size-12 rounded-chip active:scale-[0.97]"
                   onClick={() => setItems(items.filter((x) => x.key !== it.key))}>
                   <Trash2 className="size-4" aria-hidden />
                 </Button>
               </div>
-              <div role="group" aria-label={`Who had ${label}`} className="mt-2 flex flex-wrap gap-1.5">
-                {members.map((m) => {
+              <div role="group" aria-label={`Who had ${label}`} aria-describedby={bad(`split.items.${i}.memberIds`) ? errId : undefined}
+                className={cn('mt-2 flex flex-wrap gap-1.5', bad(`split.items.${i}.memberIds`) && 'rounded-chip ring-2 ring-neutral-negative/60')}>
+                {members.map((m, mi) => {
                   const on = it.memberIds.includes(m.id)
                   return (
                     <button key={m.id} type="button" aria-pressed={on} onClick={() => toggle(it.key, m.id)}
+                      data-invalid={(mi === 0 && bad(`split.items.${i}.memberIds`)) || undefined}
                       className={cn('flex min-h-12 items-center gap-1.5 rounded-chip border px-2.5 text-sm active:scale-[0.97]',
                         on ? 'border-primary bg-primary/15 text-foreground' : 'bg-surface-2 text-muted-foreground')}>
                       <MemberAvatar name={m.displayName} claimed={m.claimed} size={24} />
@@ -119,11 +130,15 @@ export function ReceiptCanvas({ members, draft, preview, error, onChange }: {
         <Plus className="size-4" aria-hidden /> Add item
       </Button>
       <div className="grid grid-cols-3 gap-2">
-        <MoneyInput id="ge-tax" label="Tax" hideLabel={false} value={draft.tax} onChange={(v) => onChange({ tax: v })} />
-        <MoneyInput id="ge-tip" label="Tip" hideLabel={false} value={draft.tip} onChange={(v) => onChange({ tip: v })} />
-        <MoneyInput id="ge-discount" label="Discount" hideLabel={false} value={draft.discount} onChange={(v) => onChange({ discount: v })} />
+        <MoneyInput id="ge-tax" label="Tax" hideLabel={false} value={draft.tax} onChange={(v) => onChange({ tax: v })}
+          invalid={bad('split.taxPaise')} describedBy={bad('split.taxPaise') ? errId : undefined} />
+        <MoneyInput id="ge-tip" label="Tip" hideLabel={false} value={draft.tip} onChange={(v) => onChange({ tip: v })}
+          invalid={bad('split.tipPaise')} describedBy={bad('split.tipPaise') ? errId : undefined} />
+        <MoneyInput id="ge-discount" label="Discount" hideLabel={false} value={draft.discount} onChange={(v) => onChange({ discount: v })}
+          invalid={bad('split.discountPaise')} describedBy={bad('split.discountPaise') ? errId : undefined} />
       </div>
-      <p role="status" className={cn('text-sm', unassigned > 0 || error || preview.error ? 'text-neutral-negative' : 'text-muted-foreground')}>{line}</p>
+      {error && <p id="ge-split-error" role="alert" className="text-sm text-neutral-negative">{error}</p>}
+      <p role="status" className={cn('text-sm', unassigned > 0 || preview.error ? 'text-neutral-negative' : 'text-muted-foreground')}>{line}</p>
       {preview.rows.length > 0 && (
         <ul aria-label="Each person’s share" className="flex flex-col gap-1 text-sm">
           {preview.rows.map((r) => {

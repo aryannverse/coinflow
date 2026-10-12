@@ -18,7 +18,10 @@ const ROW = 'flex min-h-14 cursor-pointer items-center gap-3 rounded-chip border
 /** "Which one is you?" (spec §3.3): pick a placeholder, or "I’m not listed" to join under a new name. */
 export function JoinView({ token, preview, defaultName }: { token: string; preview: InvitePreviewDTO; defaultName: string }) {
   const router = useRouter()
-  const [choice, setChoice] = useState<string>(preview.placeholders[0]?.id ?? NEW)
+  // Nothing is preselected: a claim is final, so one stray press of "Join group" must never pick an identity.
+  const [picked, setPicked] = useState<string | null>(null)
+  // After a lost race (409 already_claimed + refresh) the taken name leaves the list; so does the choice.
+  const choice = picked === NEW || preview.placeholders.some((p) => p.id === picked) ? picked : null
   const [newName, setNewName] = useState(defaultName)
   const [error, setError] = useState<{ field?: string; message: string } | null>(null)
   const claim = useMutation({
@@ -29,6 +32,11 @@ export function JoinView({ token, preview, defaultName }: { token: string; previ
   async function join(e: React.FormEvent) {
     e.preventDefault()
     if (claim.isPending) return
+    if (!choice) {
+      setError({ field: 'choice', message: 'Pick which one is you, or “I’m not listed”.' })
+      document.querySelector<HTMLInputElement>('input[name="who"]')?.focus()
+      return
+    }
     if (choice === NEW && !newName.trim()) return setError({ field: 'newName', message: 'Add the name your friends know you by.' })
     try {
       const { data } = await claim.mutateAsync(choice === NEW ? { newName: newName.trim() } : { memberId: choice })
@@ -37,7 +45,7 @@ export function JoinView({ token, preview, defaultName }: { token: string; previ
       if (err instanceof ApiError && err.code === 'already_member') return router.replace(`/groups/${preview.group.id}`)
       if (err instanceof ApiError) {
         setError({ field: err.field, message: err.message })
-        if (err.code === 'already_claimed') router.refresh() // reload the list without the taken name
+        if (err.code === 'already_claimed') router.refresh() // reload the list without the taken name (and drop it as the choice)
       } else {
         setError({ message: 'Couldn’t join. Check your connection and try again.' })
       }
@@ -51,19 +59,19 @@ export function JoinView({ token, preview, defaultName }: { token: string; previ
         <h1 className="font-display text-2xl font-bold">Join {preview.group.name}</h1>
         {range && <p className="text-sm text-muted-foreground">{range}</p>}
       </header>
-      <fieldset className="flex flex-col gap-2">
+      <fieldset className="flex flex-col gap-2" aria-describedby={error?.field === 'choice' ? 'join-error' : undefined}>
         <legend className="mb-2 font-display text-lg">Which one is you?</legend>
         {preview.placeholders.map((p) => (
           <label key={p.id} className={ROW}>
-            <input type="radio" name="who" value={p.id} checked={choice === p.id} className="size-5 accent-[var(--primary)]"
-              onChange={() => { setChoice(p.id); setError(null) }} />
+            <input type="radio" name="who" value={p.id} checked={choice === p.id} aria-invalid={error?.field === 'choice' || undefined} className="size-5 accent-[var(--primary)]"
+              onChange={() => { setPicked(p.id); setError(null) }} />
             <MemberAvatar name={p.displayName} claimed={false} size={36} />
             <span>{p.displayName}</span>
           </label>
         ))}
         <label className={ROW}>
-          <input type="radio" name="who" value={NEW} checked={choice === NEW} className="size-5 accent-[var(--primary)]"
-            onChange={() => { setChoice(NEW); setError(null) }} />
+          <input type="radio" name="who" value={NEW} checked={choice === NEW} aria-invalid={error?.field === 'choice' || undefined} className="size-5 accent-[var(--primary)]"
+            onChange={() => { setPicked(NEW); setError(null) }} />
           <span>I’m not listed</span>
         </label>
         {choice === NEW && (

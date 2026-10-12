@@ -26,13 +26,14 @@ export function PayersEditor({ members, draft, leftPaise, error, onChange }: {
               <span className="min-w-0 flex-1 truncate text-sm">{nameOf(m)}</span>
               <MoneyInput
                 id={`ge-paid-${m.id}`} label={`Amount paid by ${nameOf(m)}`} value={draft.paid[m.id] ?? ''}
-                invalid={Boolean(error)} onChange={(v) => onChange({ paid: { ...draft.paid, [m.id]: v } })}
+                invalid={Boolean(error)} describedBy={error ? 'ge-payers-error' : undefined}
+                onChange={(v) => onChange({ paid: { ...draft.paid, [m.id]: v } })}
               />
             </li>
           ))}
         </ul>
       ) : (
-        <ToggleGroup type="single" aria-label="Paid by" value={draft.payerId} onValueChange={(v) => v && onChange({ payerId: v })} className="flex w-full flex-wrap justify-start gap-2">
+        <ToggleGroup type="single" aria-label="Paid by" aria-describedby={error ? 'ge-payers-error' : undefined} value={draft.payerId} onValueChange={(v) => v && onChange({ payerId: v })} className="flex w-full flex-wrap justify-start gap-2">
           {members.map((m) => (
             <ToggleGroupItem key={m.id} value={m.id} className={CHOICE}>
               <MemberAvatar name={m.displayName} claimed={m.claimed} size={28} />

@@ -1,7 +1,7 @@
 'use client'
 import { ChevronLeft, Link2, Plus } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useGroup } from '@/hooks/group-queries'
@@ -25,7 +25,10 @@ const STACK = 5
 export function GroupView({ initial, initialExpenses, initialTab }: { initial: GroupDetailDTO; initialExpenses: Page<GroupExpenseDTO>; initialTab: GroupTab }) {
   const { data: group = initial } = useGroup(initial.id, initial)
   const sheets = useGroupSheets()
-  const [tab, setTab] = useState<GroupTab>(initialTab)
+  // The URL is the only copy of the tab: a same-group navigation to another ?tab= (a bell link to Balances, or
+  // `?tab=expenses#expense-…`) switches it, and so does Back. `initialTab` covers the server render.
+  const params = useSearchParams()
+  const tab: GroupTab = GROUP_TABS.find((t) => t === params.get('tab')) ?? initialTab
   const active = group.members.filter((m) => !m.removedAt)
   const waiting = active.filter((m) => !m.claimed).length
   const range = dateRange(group.startsOn, group.endsOn)
@@ -34,15 +37,21 @@ export function GroupView({ initial, initialExpenses, initialTab }: { initial: G
   function changeTab(v: string) {
     const next = GROUP_TABS.find((t) => t === v)
     if (!next) return
-    setTab(next)
-    // Keep the tab in the URL (shareable, survives reload) without a server round-trip: Next syncs native
-    // history.replaceState with its router, whereas router.replace would re-render the whole server page per tab.
-    window.history.replaceState(window.history.state, '', `/groups/${group.id}?tab=${next}`)
+    // The URL holds the tab (shareable, survives reload, `tab` above derives from it) with no server round-trip: Next
+    // syncs a native history.replaceState into useSearchParams, whereas router.replace would re-render the whole server
+    // page per tab. State must be null: Next skips the sync for its own (`__NA`) history entries.
+    window.history.replaceState(null, '', `?tab=${next}`)
   }
 
   function invite() {
     changeTab('members')
-    requestAnimationFrame(() => document.getElementById('invite-link')?.focus())
+    // The tab follows the URL, which the router applies in a transition: wait (a few frames at most) for the field.
+    const focusLink = (tries: number) => {
+      const el = document.getElementById('invite-link')
+      if (el) el.focus()
+      else if (tries > 0) requestAnimationFrame(() => focusLink(tries - 1))
+    }
+    requestAnimationFrame(() => focusLink(30))
   }
 
   return (

@@ -28,3 +28,12 @@ export function paymentHeadline(p: Pick<Payment, 'from' | 'to' | 'amountPaise'>,
   const subject = p.from === viewerId ? 'You pay' : `${who(p.from)} pays`
   return `${subject} ${who(p.to)} ${formatINR(p.amountPaise)}`
 }
+
+/** "just now", "5 min ago", "3 h ago", else "12 Oct" (IST). Shared by the bell and the group Activity tab. */
+export function timeAgo(iso: string, now: number = Date.now()): string {
+  const mins = Math.round((now - new Date(iso).getTime()) / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.round(mins / 60)
+  return hrs < 24 ? `${hrs} h ago` : new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
+}

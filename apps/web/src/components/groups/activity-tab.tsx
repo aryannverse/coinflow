@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useGroupActivity } from '@/hooks/group-queries'
 import type { GroupDetailDTO } from '@/lib/api-types'
+import { timeAgo } from '@/lib/group-display'
 
 function KindIcon({ kind, className }: { kind: string; className?: string }) {
   if (kind.startsWith('expense_')) return <Receipt className={className} aria-hidden />
@@ -12,15 +13,6 @@ function KindIcon({ kind, className }: { kind: string; className?: string }) {
   if (kind.startsWith('member_')) return <UserPlus className={className} aria-hidden />
   if (kind === 'undo') return <Undo2 className={className} aria-hidden />
   return <Info className={className} aria-hidden />
-}
-
-/** Same wording as the bell: "5 min ago", "3 h ago", else "12 Oct". */
-export function ago(iso: string, now = Date.now()): string {
-  const mins = Math.round((now - new Date(iso).getTime()) / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins} min ago`
-  const hrs = Math.round(mins / 60)
-  return hrs < 24 ? `${hrs} h ago` : new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
 }
 
 /** Spec §3.5 Activity tab: the group feed, newest first. */
@@ -59,7 +51,7 @@ export function ActivityTab({ group }: { group: GroupDetailDTO }) {
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="text-sm">{a.summary}</span>
-                <time dateTime={a.createdAt} className="text-xs text-muted-foreground">{ago(a.createdAt)}</time>
+                <time dateTime={a.createdAt} className="text-xs text-muted-foreground">{timeAgo(a.createdAt)}</time>
               </span>
             </li>
           ))}

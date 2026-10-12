@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { gk, useAcceptFriend, useDropFriendRequest, useMarkAllRead, useMarkRead, useNotifications, useResolveSettlement } from '@/hooks/group-queries'
 import type { NotificationDTO } from '@/lib/api-types'
+import { timeAgo } from '@/lib/group-display'
 import { cn } from '@/lib/utils'
 import { useNotificationStream } from './notification-stream'
 
@@ -18,14 +19,6 @@ export function NotificationIcon({ kind, className }: { kind: string; className?
   if (kind === 'group_added') return <UsersRound className={className} aria-hidden />
   if (kind.startsWith('coach_')) return <Sparkles className={className} aria-hidden />
   return <Bell className={className} aria-hidden />
-}
-
-const ago = (iso: string) => {
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins} min ago`
-  const hrs = Math.round(mins / 60)
-  return hrs < 24 ? `${hrs} h ago` : new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
 }
 
 function Item({ n, onNavigate }: { n: NotificationDTO; onNavigate: () => void }) {
@@ -49,7 +42,7 @@ function Item({ n, onNavigate }: { n: NotificationDTO; onNavigate: () => void })
         <span className="flex min-w-0 flex-1 flex-col">
           <span className={cn('text-sm', !n.readAt && 'font-semibold')}>{n.title}{!n.readAt && <span className="sr-only"> (unread)</span>}</span>
           {n.body && <span className="text-xs text-muted-foreground">{n.body}</span>}
-          <span className="text-xs text-muted-foreground">{ago(n.createdAt)}</span>
+          <span className="text-xs text-muted-foreground">{timeAgo(n.createdAt)}</span>
         </span>
         {!n.readAt && <span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" />}
       </Link>

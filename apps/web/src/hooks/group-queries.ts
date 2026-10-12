@@ -96,13 +96,20 @@ export const useAddPlaceholder = () =>
   )
 
 // ── Plain mutations (final or non-ledger: no undo by spec) ─────────────────────────────────────────
-function useGroupMutation<V, R>(fn: (v: V) => Promise<R>, opts: { success?: (v: V) => string; inlineFieldErrors?: boolean } = {}) {
+/**
+ * Plain mutation: refreshes `keys` (default: groups, notifications and the personal ledger, since group changes move
+ * mirrors), toasts `success(v, r)`, and toasts errors unless signed out or (with `inlineFieldErrors`) the error names a field.
+ */
+function useGroupMutation<V, R>(
+  fn: (v: V) => Promise<R>,
+  opts: { success?: (v: V, r: R) => string; inlineFieldErrors?: boolean; keys?: QueryKey[] } = {},
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: fn,
-    onSuccess: (_r, v) => {
-      for (const key of [...GROUP_KEYS, ...LEDGER]) void qc.invalidateQueries({ queryKey: key })
-      if (opts.success) toast.success(opts.success(v))
+    onSuccess: (r, v) => {
+      for (const key of opts.keys ?? [...GROUP_KEYS, ...LEDGER]) void qc.invalidateQueries({ queryKey: key })
+      if (opts.success) toast.success(opts.success(v, r))
     },
     onError: (err) => {
       if (err instanceof ApiError && (err.status === 401 || (opts.inlineFieldErrors && err.field))) return
@@ -136,7 +143,8 @@ export const fk = {
   all: ['friends'] as const,
   search: (email: string) => ['friends', 'search', email] as const,
 }
-const FRIEND_KEYS: QueryKey[] = [fk.all, gk.notifications]
+/** Friend changes also change who can be added to groups, so groups refresh too. */
+const FRIEND_KEYS: QueryKey[] = [fk.all, gk.notifications, gk.all]
 
 export const useFriends = (initial?: FriendsDTO) =>
   useQuery({ queryKey: fk.all, queryFn: () => api<{ data: FriendsDTO }>('/friends').then((r) => r.data), initialData: initial })
@@ -149,36 +157,22 @@ export const useFriendSearch = (email: string) =>
     staleTime: 10_000,
   })
 
-function useFriendMutation<V, R>(fn: (v: V) => Promise<R>, opts: { success?: (v: V, r: R) => string; inlineFieldErrors?: boolean } = {}) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: fn,
-    onSuccess: (r, v) => {
-      for (const key of [...FRIEND_KEYS, gk.all]) void qc.invalidateQueries({ queryKey: key })
-      if (opts.success) toast.success(opts.success(v, r))
-    },
-    onError: (err) => {
-      if (err instanceof ApiError && (err.status === 401 || (opts.inlineFieldErrors && err.field))) return
-      toast.error(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.')
-    },
-  })
-}
-
 type SentRequest = { data: { requestId: string; status: 'pending' | 'accepted'; user: { name: string } } }
 export const useSendFriendRequest = () =>
-  useFriendMutation((email: string) => api<SentRequest>('/friends/requests', { method: 'POST', json: { email } }), {
+  useGroupMutation((email: string) => api<SentRequest>('/friends/requests', { method: 'POST', json: { email } }), {
+    keys: FRIEND_KEYS,
     inlineFieldErrors: true,
     success: (_v, r) => (r.data.status === 'accepted' ? `You and ${r.data.user.name} are now friends` : `Request sent to ${r.data.user.name}`),
   })
 export const useAcceptFriend = () =>
-  useFriendMutation((v: { requestId: string; name: string }) => api(`/friends/requests/${v.requestId}/accept`, { method: 'POST' }),
-    { success: (v) => `You and ${v.name} are now friends` })
+  useGroupMutation((v: { requestId: string; name: string }) => api(`/friends/requests/${v.requestId}/accept`, { method: 'POST' }),
+    { keys: FRIEND_KEYS, success: (v) => `You and ${v.name} are now friends` })
 export const useDropFriendRequest = () =>
-  useFriendMutation((v: { requestId: string; label: string }) => api(`/friends/requests/${v.requestId}`, { method: 'DELETE' }),
-    { success: (v) => v.label })
+  useGroupMutation((v: { requestId: string; label: string }) => api(`/friends/requests/${v.requestId}`, { method: 'DELETE' }),
+    { keys: FRIEND_KEYS, success: (v) => v.label })
 export const useUnfriend = () =>
-  useFriendMutation((v: { userId: string; name: string }) => api(`/friends/${encodeURIComponent(v.userId)}`, { method: 'DELETE' }),
-    { success: (v) => `Removed ${v.name} from friends` })
+  useGroupMutation((v: { userId: string; name: string }) => api(`/friends/${encodeURIComponent(v.userId)}`, { method: 'DELETE' }),
+    { keys: FRIEND_KEYS, success: (v) => `Removed ${v.name} from friends` })
 /** Undo toast (spec §3.6 member add). */
 export const useAddFriendMember = () =>
   useLedgerMutation(
