@@ -147,6 +147,7 @@ Itemized mode:
   - `settlement_confirmed` and `settlement_rejected`;
   - `expense_added` and `expense_edited`, sent to involved members other than the actor;
   - `member_claimed`;
+  - `friend_request` (actionable: Accept / Decline), `friend_accepted` and `group_added` (§3.8);
   - `coach_*` (Part C).
 - **Delivery:** `GET /api/v1/notifications/stream` (SSE) pushes new rows. The client falls back to polling every 30 s if SSE drops. A list endpoint provides read and mark-read.
 - **Where they appear:** the bell in the TopBar shows an unread count with an `aria-live` polite announcement.
@@ -205,6 +206,51 @@ Group expense create, edit and delete, settlement mark, and member add are audit
 | `notifications/stream` | GET (SSE) |
 
 All endpoints follow the Part A response and error contract, use Zod validation, return 404 for non-members, and use the 30 s undo audit.
+
+### 3.8 Friends
+Added at the user's request after the plan was written: "anyone logged in can be friended by searching their email ID. Once the person approves their friend request, they can be added to a group expense split directly, without any invite link or accepting it manually."
+
+- **Why.** Placeholders and invite links suit people who aren't on Coinflow yet. For people who are, an accepted friend request is standing consent: either friend can then put the other straight into a group as a joined member, with no link and no claim step.
+- **Finding someone.** Search by **exact email**, case-insensitive. There are no partial matches and no directory, so nobody can browse or enumerate accounts.
+  - A miss says "No Coinflow account uses that email. Invite them with a group link instead."
+  - Searching your own email says "That's you."
+- **Data.** `friendships(id, requesterId, addresseeId, status 'pending'|'accepted', createdAt, respondedAt?)`.
+  - There is one row per pair of people (unique on the unordered pair), and requester ≠ addressee.
+  - Deleting a user cascades.
+- **Requests.**
+  - **Send:** the row is created as `pending`, and the addressee gets an actionable `friend_request` notification (Accept / Decline).
+  - **Crossed requests:** if the other person already asked you, sending a request accepts theirs.
+  - **Accept:** the row becomes `accepted`, and the requester gets a `friend_accepted` notification.
+  - **Decline / cancel / unfriend:** decline (by the addressee), cancel (by the requester) and unfriend (by either) delete the row. Declining is silent.
+  - **Unfriending** never touches existing group memberships, expenses or balances.
+- **Adding a friend to a group.** Any claimed member can add any of **their own** friends:
+  - **As a new member.** The friend joins with `userId` set, `claimedAt` = now and `addedBy` = the adder, and gets a `group_added` notification. If a member with the same name already exists, the request is refused with a hint to use "Link to a friend" on that name instead.
+  - **By linking an existing placeholder** ("This is Asha"). This behaves exactly like a claim (§3.3 step 4): it sets `userId`, backfills that person's mirrors, notifies them and the group, and hands over any pending payments that were waiting for them. A confirm step tells the adder that the placeholder's expenses will appear in the friend's Activity.
+  - **When creating a group.** A new group or event can include friends alongside placeholders.
+  - Adding or linking someone who isn't your friend is refused with `not_friends`.
+- **Undo.** Adding a friend is a member add, so it is audited. Undo works until they are part of an expense or settlement. Linking a placeholder is final, like a claim.
+- **Screens.**
+  - **`/friends`**, reached from the Groups page header and from Profile, has:
+    - email search with a result card (Add friend / Requested / Accept / Friends);
+    - incoming requests with Accept and Decline;
+    - outgoing requests with Cancel;
+    - the friends list with Unfriend, which asks for confirmation first.
+  - **Members tab and New-group sheet:** "Add from friends" sits beside adding by name, and each placeholder gets "Link to a friend".
+  - **Bell:** friend requests appear with Accept / Decline.
+- **API** (under `/api/v1`):
+
+| Endpoint | Methods |
+|---|---|
+| `friends` | GET: friends, incoming, outgoing |
+| `friends/search?email=` | GET: one exact match or null |
+| `friends/requests` | POST `{email}` |
+| `friends/requests/[id]/accept` | POST |
+| `friends/requests/[id]` | DELETE (decline or cancel) |
+| `friends/[userId]` | DELETE (unfriend) |
+| `groups/[id]/members/friends` | POST `{userId}` (add a friend as a joined member) |
+| `groups/[id]/members/[memberId]/link` | POST `{userId}` (link a placeholder to a friend) |
+
+`groups` POST also accepts `friendIds: string[]`.
 
 ---
 
@@ -289,7 +335,8 @@ LLM configuration:
   - `split_mismatch` (422, with a field naming the remaining amount);
   - `settlement_state` (409);
   - `invite_invalid` (404);
-  - `already_member` (409).
+  - `already_member` (409);
+  - `already_friends` (409), `friend_request_exists` (409) and `not_friends` (422, field `userId`).
 - **Agent errors.** Errors surface as chat messages with Retry, and never as raw stack traces.
 - **LLM timeouts.** These take 60 s, then return a friendly error.
 
@@ -333,10 +380,11 @@ LLM configuration:
 - Recurring group expenses.
 - Bank or UPI auto-detection.
 - Hosting and deployment.
+- Blocking users, friend suggestions, contact import, and agent tools for friends.
 - Multi-language UI. Hindi STT works if the model supports it, but the UI stays English.
 
 ## 9. Plan shape (few, large tasks)
-1. **B backend:** schema and migration (including the Part A changes); split engine; balances and min-cash-flow with why; groups, members, invites and claim; expenses with mirrors; settlements; activity; notifications plus SSE; the STS/G change; API; tests.
+1. **B backend:** schema and migration (including the Part A changes); split engine; balances and min-cash-flow with why; groups, members, invites and claim; expenses with mirrors; settlements; activity; notifications plus SSE; the STS/G change; friends (§3.8); API; tests.
 2. **B frontend:**
    - Groups tab and list;
    - the group page and its tabs;
@@ -345,7 +393,8 @@ LLM configuration:
    - settle up and reminders;
    - the join page;
    - the bell and notifications;
-   - the Profile toggles.
+   - the Profile toggles;
+  - the Friends page, plus adding and linking friends in groups.
 3. **C service:** `apps/agent` with the LLM config, auth bridge, read and proposal tools, the LangGraph agent and Deep Agents planner, STT, TTS, receipt, the coach, pytest and docker-compose.
 4. **C frontend:** the Next `/api/v1/agent/*` proxy plus the internal-token path in auth; the agent panel; proposal chips with approve, edit and dismiss; voice; camera; TTS; context scoping; and the coach notifications.
 5. **Verification and docs:** the E2E suites for B and C, axe and reflow, the HCI doc update, and a full `pnpm verify`.
