@@ -2,11 +2,12 @@ import { AppError, invalid } from '@/server/errors'
 import { agentFetch, assertUploadSize, relayAgentError } from '@/server/agent-proxy'
 import { route, sniffImageType } from '@/server/http'
 import type { ReceiptDTO } from '@/lib/api-types'
+import { RECEIPT_MAX_BYTES as MAX_BYTES, RECEIPT_TOO_LARGE } from '@/lib/upload-limits'
 
-const MAX_BYTES = 5 * 1024 * 1024 // spec §4.5
+export const maxDuration = 300 // spec §10: Vercel Hobby's cap; the agent's own 60 s LLM timeout ends it well before
 
-/** Receipt photos pass straight through to the agent and are never stored (spec §4.5). */
-const tooLarge = () => new AppError('image_too_large', 'That photo is over 5 MB. Try a closer, smaller shot.', 413)
+/** Receipt photos pass straight through to the agent and are never stored (spec §4.5). 4 MB: Vercel's body limit. */
+const tooLarge = () => new AppError('image_too_large', RECEIPT_TOO_LARGE, 413)
 
 export const POST = route(async ({ req, user }) => {
   assertUploadSize(req, MAX_BYTES, tooLarge)

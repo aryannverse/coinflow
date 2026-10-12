@@ -6,10 +6,10 @@ import { useGroupSheets } from '@/components/groups/group-sheets'
 import { useQuickAdd } from '@/components/quick-add/quick-add-provider'
 import { api, ApiError } from '@/lib/api-client'
 import type { ReceiptDTO } from '@/lib/api-types'
+import { downscaleForUpload } from '@/lib/downscale-image'
 import { receiptNotice, receiptToDraft } from '@/lib/proposal-apply'
+import { RECEIPT_MAX_BYTES, RECEIPT_TOO_LARGE } from '@/lib/upload-limits'
 import { useAgent } from './agent-provider'
-
-const MAX_BYTES = 5 * 1024 * 1024
 
 /** Spec §4.5: a receipt photo fills the itemized canvas (on a group page) or quick add for a single total. */
 export function CameraButton({ available }: { available: boolean }) {
@@ -19,10 +19,14 @@ export function CameraButton({ available }: { available: boolean }) {
   const input = useRef<HTMLInputElement>(null)
   const [note, setNote] = useState<string | null>(null)
 
-  async function scan(file: File) {
-    if (file.size > MAX_BYTES) return setNote('That photo is over 5 MB. Try a closer, smaller shot.')
+  async function scan(original: File) {
     setNote(null)
     agent.chat.setStatus('reading')
+    const file = await downscaleForUpload(original) // spec §10: longest side ≤ 2,000 px, JPEG, under Vercel's body limit
+    if (file.size > RECEIPT_MAX_BYTES) {
+      agent.chat.setStatus('idle')
+      return setNote(RECEIPT_TOO_LARGE)
+    }
     const form = new FormData()
     form.append('file', file)
     try {

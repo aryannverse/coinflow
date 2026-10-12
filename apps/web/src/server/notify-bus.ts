@@ -1,6 +1,7 @@
 import 'server-only'
 import postgres from 'postgres'
 import { logger } from './logger'
+import { directDatabaseUrl } from './runtime-config'
 
 export const NOTIFY_CHANNEL = 'coinflow_notifications'
 
@@ -12,7 +13,7 @@ const bus: Bus = (g.__coinflowBus ??= { listeners: new Map(), started: null, sql
 /** One LISTEN connection per process (it survives Next dev hot reloads); fans `pg_notify(userId)` out to that user's streams. */
 function start(): Promise<void> {
   bus.started ??= (async () => {
-    const url = process.env.DATABASE_URL
+    const url = directDatabaseUrl() // LISTEN needs a direct connection: Neon's pooler drops it (spec §10)
     if (!url) throw new Error('DATABASE_URL is not set')
     bus.sql = postgres(url, { max: 1 })
     await bus.sql.listen(NOTIFY_CHANNEL, (userId) => {

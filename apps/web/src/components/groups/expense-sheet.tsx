@@ -15,10 +15,12 @@ import { useCategories } from '@/hooks/queries'
 import { useCreateGroupExpense, useGroup, useGroupExpense, useUpdateGroupExpense } from '@/hooks/group-queries'
 import { api, ApiError } from '@/lib/api-client'
 import type { GroupDetailDTO, GroupExpenseDTO, ReceiptDTO } from '@/lib/api-types'
+import { downscaleForUpload } from '@/lib/downscale-image'
 import { buildBody, draftFromExpense, emptyDraft, previewDraft, type ExpenseDraft } from '@/lib/expense-form'
 import { parseRupeesToPaise } from '@/lib/money'
 import { receiptNotice, receiptToDraft } from '@/lib/proposal-apply'
 import type { SplitMode } from '@/lib/split'
+import { RECEIPT_MAX_BYTES, RECEIPT_TOO_LARGE } from '@/lib/upload-limits'
 import { cn } from '@/lib/utils'
 import { FIELD } from './field'
 import { MemberAvatar } from './member-avatar'
@@ -42,7 +44,6 @@ const FOCUS: [string, string[]][] = [
 ]
 type FieldError = { field: string; message: string }
 type Scan = { reading: boolean; error: string | null; notice: string | null }
-const RECEIPT_MAX_BYTES = 5 * 1024 * 1024 // spec §4.5
 
 function ExpenseForm({ group, expense, prefill, notice, onDone }: {
   group: GroupDetailDTO; expense?: GroupExpenseDTO; prefill?: Partial<ExpenseDraft>; notice?: string; onDone: () => void
@@ -68,9 +69,10 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
   const vision = useAgentHealth().data?.capabilities?.vision === true
   const [scan, setScan] = useState<Scan>({ reading: false, error: null, notice: null })
   const fileRef = useRef<HTMLInputElement>(null)
-  async function scanReceipt(file: File) {
-    if (file.size > RECEIPT_MAX_BYTES) return setScan({ reading: false, error: 'That photo is over 5 MB. Try a closer, smaller shot.', notice: null })
+  async function scanReceipt(original: File) {
     setScan({ reading: true, error: null, notice: null })
+    const file = await downscaleForUpload(original) // spec §10: longest side ≤ 2,000 px, JPEG, under Vercel's body limit
+    if (file.size > RECEIPT_MAX_BYTES) return setScan({ reading: false, error: RECEIPT_TOO_LARGE, notice: null })
     const form = new FormData()
     form.append('file', file)
     try {

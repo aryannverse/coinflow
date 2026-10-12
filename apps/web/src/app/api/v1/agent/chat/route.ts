@@ -4,6 +4,7 @@ import { agentFetch, proposalFilter, relayAgentError, SSE_HEADERS, validatePropo
 import { parseJson, route } from '@/server/http'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // spec §10: Vercel Hobby's cap; a turn's own budget is 60 s
 
 const chatSchema = z.object({
   message: z.string().trim().min(1, 'Type a message.').max(2000),

@@ -17,6 +17,8 @@ import * as txns from './transactions/route'
 import * as txn from './transactions/[id]/route'
 import * as chat from './agent/chat/route'
 import * as health from './agent/health/route'
+import * as receipt from './agent/receipt/route'
+import * as stt from './agent/stt/route'
 
 const KEY = 'coinflow-test-secret-0123456789abcdef'
 const url = (p: string) => `http://localhost/api/v1${p}`
@@ -178,5 +180,28 @@ describe('agent bridge', () => {
     const capped = await post('bill:3')
     expect(capped.status).toBe(409)
     expect((await capped.json()).error.code).toBe('coach_cap')
+  })
+
+  it('spec §10: long-running agent routes may use Vercel Hobby’s 300 s; uploads stop at 4 MB before reaching the agent', async () => {
+    expect([chat.maxDuration, stt.maxDuration, receipt.maxDuration]).toEqual([300, 300, 300])
+    const agent = vi.fn(async () => Response.json({ data: {} }))
+    vi.stubGlobal('fetch', agent)
+    clerkState.userId = 'user_a'
+    clerkState.email = 'user_a@example.com'
+    const tooBig = String(4 * 1024 * 1024 + 70 * 1024) // just over 4 MB plus multipart slack; under Vercel's 4.5 MB
+    const declared = (path: string) => new Request(url(path), {
+      method: 'POST', body: 'x', headers: { 'content-type': 'multipart/form-data; boundary=x', 'content-length': tooBig },
+    })
+    const photo = await receipt.POST(declared('/agent/receipt'))
+    expect(photo.status).toBe(413)
+    expect((await photo.json()).error).toEqual({ code: 'image_too_large', message: 'That photo is over 4 MB. Try a closer, smaller shot.' })
+    const voice = await stt.POST(declared('/agent/stt'))
+    expect(voice.status).toBe(413)
+    expect((await voice.json()).error.code).toBe('audio_too_large')
+    // An actual 4 MB + 1 byte file is refused too, even without a declared length.
+    const form = new FormData()
+    form.append('file', new File([new Uint8Array(4 * 1024 * 1024 + 1)], 'r.jpg', { type: 'image/jpeg' }))
+    expect((await receipt.POST(new Request(url('/agent/receipt'), { method: 'POST', body: form }))).status).toBe(413)
+    expect(agent).not.toHaveBeenCalled()
   })
 })

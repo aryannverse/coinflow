@@ -1,8 +1,9 @@
 import { AppError, invalid } from '@/server/errors'
 import { agentFetch, assertUploadSize, relayAgentError } from '@/server/agent-proxy'
 import { route } from '@/server/http'
+import { AUDIO_MAX_BYTES as MAX_BYTES } from '@/lib/upload-limits'
 
-const MAX_BYTES = 6 * 1024 * 1024
+export const maxDuration = 300 // spec §10: Vercel Hobby's cap
 
 const tooLarge = () => new AppError('audio_too_large', 'That recording is too long. Keep it under 30 seconds.', 413)
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeUser, resetDb } from '@test/int/helpers'
 import { clerkState } from '@test/int/clerk-mock'
 
@@ -11,6 +11,18 @@ import { listNotifications, markAllRead, markRead, notify } from './notification
 
 const send = (userId: string, title: string) =>
   getDb().transaction((tx) => notify(tx, [{ userId, kind: 'expense_added', title, body: '', href: '/groups/x', payload: {} }]))
+
+async function readToEnd(reader: ReadableStreamDefaultReader<Uint8Array>, acc: { text: string }, ms = 5_000) {
+  const dec = new TextDecoder()
+  const deadline = Date.now() + ms
+  for (;;) {
+    const left = deadline - Date.now()
+    if (left <= 0) throw new Error(`The stream never ended. Got: ${acc.text}`)
+    const chunk = await Promise.race([reader.read(), new Promise<null>((r) => setTimeout(() => r(null), left))])
+    if (chunk?.done) return
+    if (chunk) acc.text += dec.decode(chunk.value)
+  }
+}
 
 async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, acc: { text: string }, needle: string, ms = 5_000) {
   const dec = new TextDecoder()
@@ -30,6 +42,9 @@ describe('notifications', () => {
     await makeUser('user_b')
     clerkState.userId = 'user_a'
     clerkState.email = 'user_a@example.com'
+  })
+  afterEach(() => {
+    delete process.env.SSE_MAX_MS
   })
   afterAll(async () => {
     await closeBus()
@@ -74,6 +89,46 @@ describe('notifications', () => {
     const acc = { text: '' }
     await readUntil(res.body!.getReader(), acc, '"title":"second"')
     expect(acc.text).not.toContain('"title":"first"')
+    ctrl.abort()
+  })
+
+  it('SSE on serverless: closes itself after SSE_MAX_MS with a retry hint, and a reconnect resumes from Last-Event-ID', async () => {
+    expect(stream.maxDuration).toBe(300) // Vercel Hobby's cap; the stream closes itself before it
+    await send('user_a', 'before')
+    process.env.SSE_MAX_MS = '400'
+    const first = await stream.GET(new Request('http://localhost/api/v1/notifications/stream'))
+    const acc = { text: '' }
+    await readToEnd(first.body!.getReader(), acc) // ends on its own: no abort from the client
+    expect(acc.text).toContain('event: ready')
+    const [, lastId] = acc.text.match(/retry: 2000\nid: (\d+)\n\n$/) ?? []
+    expect(lastId).toBeDefined() // the final block tells EventSource where it got to
+
+    await send('user_a', 'while away') // lands between the close and the reconnect
+    process.env.SSE_MAX_MS = '0'
+    const ctrl = new AbortController()
+    const again = await stream.GET(new Request('http://localhost/api/v1/notifications/stream', {
+      signal: ctrl.signal, headers: { 'last-event-id': lastId },
+    }))
+    const acc2 = { text: '' }
+    await readUntil(again.body!.getReader(), acc2, '"title":"while away"')
+    expect(acc2.text).not.toContain('"title":"before"')
+    ctrl.abort()
+  })
+
+  it('SSE resume works for a user with no notifications yet (Last-Event-ID: 0)', async () => {
+    process.env.SSE_MAX_MS = '300'
+    const first = await stream.GET(new Request('http://localhost/api/v1/notifications/stream'))
+    const acc = { text: '' }
+    await readToEnd(first.body!.getReader(), acc)
+    expect(acc.text).toMatch(/retry: 2000\nid: 0\n\n$/)
+    await send('user_a', 'first ever')
+    process.env.SSE_MAX_MS = '0'
+    const ctrl = new AbortController()
+    const again = await stream.GET(new Request('http://localhost/api/v1/notifications/stream', {
+      signal: ctrl.signal, headers: { 'last-event-id': '0' },
+    }))
+    const acc2 = { text: '' }
+    await readUntil(again.body!.getReader(), acc2, '"title":"first ever"')
     ctrl.abort()
   })
 })

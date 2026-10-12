@@ -1,5 +1,12 @@
 packages:
   - apps/*
+# Every dependency with an install script is listed, so a clean install (Vercel) passes pnpm's strict build check.
+# All are off, exactly as local installs have run them: the app needs none of these scripts.
 allowBuilds:
+  core-js: false
+  cpu-features: false
+  esbuild: false
+  protobufjs: false
   sharp: false
+  ssh2: false
   unrs-resolver: false

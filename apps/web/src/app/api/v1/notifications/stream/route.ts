@@ -1,10 +1,22 @@
 import { route } from '@/server/http'
 import { logger } from '@/server/logger'
 import { subscribe } from '@/server/notify-bus'
+import { sseMaxMs } from '@/server/runtime-config'
 import { latestSeq, listSince, unreadCount } from '@/server/services/notifications'
 
 export const dynamic = 'force-dynamic'
+// Spec §10: Vercel Hobby caps a function at 300 s. The stream ends itself first (SSE_MAX_MS, 280 s on Vercel, off
+// locally) with a retry hint and its position, so EventSource reconnects and resumes from Last-Event-ID.
+export const maxDuration = 300
 const PING_MS = 25_000
+const RETRY_MS = 2_000
+
+/** A Last-Event-ID the client sent back (0 included: "nothing seen yet"), or null when there is none. */
+function resumePoint(header: string | null): number | null {
+  if (header === null || header.trim() === '') return null
+  const n = Number(header)
+  return Number.isSafeInteger(n) && n >= 0 ? n : null
+}
 
 /**
  * Spec §3.4: push new notification rows over SSE. `id:` is the row's seq, so a reconnecting EventSource resumes with
@@ -13,8 +25,8 @@ const PING_MS = 25_000
  */
 export const GET = route(async ({ req, user }) => {
   const encoder = new TextEncoder()
-  const resumeFrom = Number(req.headers.get('last-event-id'))
-  let cursor = Number.isSafeInteger(resumeFrom) && resumeFrom > 0 ? resumeFrom : await latestSeq(user.id)
+  let cursor = resumePoint(req.headers.get('last-event-id')) ?? (await latestSeq(user.id))
+  const maxMs = sseMaxMs()
   let closed = false
   let cleanup = () => {}
 
@@ -40,10 +52,21 @@ export const GET = route(async ({ req, user }) => {
 
       const unsubscribe = await subscribe(user.id, drain)
       const ping = setInterval(() => write(': ping\n\n'), PING_MS)
+      // After any drain in flight, so the id written is the last row actually sent. An id-only block sets the
+      // client's Last-Event-ID without firing an event.
+      const expire = maxMs > 0
+        ? setTimeout(() => {
+          queue = queue.then(() => {
+            write(`retry: ${RETRY_MS}\nid: ${cursor}\n\n`)
+            cleanup()
+          })
+        }, maxMs)
+        : undefined
       cleanup = () => {
         if (closed) return
         closed = true
         clearInterval(ping)
+        clearTimeout(expire)
         unsubscribe()
         try {
           controller.close()
