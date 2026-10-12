@@ -34,6 +34,8 @@ test('friend by email → accept from the bell → add to a group directly → t
   await page2.getByRole('button', { name: /^Notifications, \d+ unread$/ }).click()
   await page2.getByRole('button', { name: 'Accept' }).first().click()
   await expect(page2.getByText(/ are now friends$/)).toBeVisible()
+  // The Accept/Decline buttons leave; focus stays on that notification instead of dropping to <body>.
+  await expect(page2.getByRole('link', { name: /wants to be friends/ })).toBeFocused()
 
   // Back to the first person: a group, then add the friend from the Members tab.
   await page.goto('/groups')

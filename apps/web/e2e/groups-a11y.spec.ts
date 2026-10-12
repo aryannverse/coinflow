@@ -1,19 +1,10 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { e2e2Email, hasE2E2User, seedFriends, seedGroup, signInOnboarded } from './helpers'
-
-/**
- * Entrances fade in (Reveal/BlurFade, sheets, toasts): axe would read colours mid-fade. Wait for the network and for every
- * finite animation to finish, as Part A's a11y spec does for the toast. Never exclude the element instead.
- */
-async function settle(page: Page) {
-  await page.waitForLoadState('networkidle')
-  await expect.poll(() => page.evaluate(() => document.getAnimations()
-    .filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length)).toBe(0)
-}
+import { AGENT_ONLINE, e2e2Email, hasE2E2User, seedFriends, seedGroup, settleAnimations, signInOnboarded, stubAgent } from './helpers'
 
 async function serious(page: Page) {
-  await settle(page)
+  // Never read colours mid-fade (Part A's rule for the toast): wait for animations, never exclude the element.
+  await settleAnimations(page)
   const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
   return violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)
 }
@@ -86,7 +77,7 @@ test('no serious axe violations with the expense sheet (itemized), the settle sh
   expect(await serious(page)).toEqual([])
   await page.keyboard.press('Escape')
   await page.goto(`/groups/${g.id}`)
-  await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: { online: true, capabilities: { chat: true, vision: true, stt: true, tts: true } } } }))
+  await stubAgent(page, AGENT_ONLINE)
   await page.reload()
   await page.getByRole('button', { name: /^Ask Coinflow…/ }).click()
   await expect(page.getByRole('dialog', { name: 'Ask Coinflow' })).toBeVisible()
@@ -97,7 +88,8 @@ test('the join page passes axe for the second person', async ({ page, browser })
   test.skip(!hasE2E2User(), 'E2E2_CLERK_USER_EMAIL is not set')
   await signInOnboarded(page)
   const g = await seedGroup(page)
-  const ctx2 = await browser.newContext()
+  // The project's viewport and colour scheme, so /join is checked in desktop dark and mobile light.
+  const ctx2 = await browser.newContext({ ...test.info().project.use })
   const page2 = await ctx2.newPage()
   await signInOnboarded(page2, 50_000, e2e2Email())
   await page2.goto(g.invitePath)

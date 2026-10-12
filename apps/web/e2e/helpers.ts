@@ -47,12 +47,19 @@ export async function withSql<T>(fn: (sql: postgres.Sql) => Promise<T>): Promise
 }
 
 /** Deletes the E2E user's row so the next sign-in is a brand-new user (children cascade). */
-export function resetE2EUser() {
+/**
+ * Deletes one user's row (children cascade). Their own groups go first, as the app's deleteUser does: in one statement
+ * the creator's group_members row is updated twice while its group cascades away, and the foreign key fails.
+ */
+export function deleteUserByEmail(email: string) {
   return withSql(async (sql) => {
-    // Their groups first, as the app's deleteUser does (one statement trips the group_members foreign key).
-    await sql`delete from groups where created_by in (select id from users where email = ${e2eEmail()})`
-    await sql`delete from users where email = ${e2eEmail()}`
+    await sql`delete from groups where created_by in (select id from users where email = ${email})`
+    await sql`delete from users where email = ${email}`
   })
+}
+
+export function resetE2EUser() {
+  return deleteUserByEmail(e2eEmail())
 }
 
 export async function signIn(page: Page, email = e2eEmail()) {
@@ -164,4 +171,44 @@ export async function tabTo(page: Page, target: Locator, maxTabs = 30) {
     await page.keyboard.press('Tab')
   }
   throw new Error(`Tab never reached ${target} within ${maxTabs} presses`)
+}
+
+/**
+ * Entrances fade in (Reveal/BlurFade, sheets, toasts): axe and screenshots would read colours mid-fade. Waits for the
+ * network and for every finite animation to finish (infinite ones, such as React Flow's dashed edges, are ignored).
+ */
+export async function settleAnimations(page: Page) {
+  await page.waitForLoadState('networkidle')
+  await expect.poll(() => page.evaluate(() => document.getAnimations()
+    .filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length)).toBe(0)
+}
+
+export type AgentHealth = { online: boolean; capabilities: { chat: boolean; vision: boolean; stt: boolean; tts: boolean } | null }
+export const AGENT_ONLINE: AgentHealth = { online: true, capabilities: { chat: true, vision: true, stt: true, tts: true } }
+export const AGENT_OFFLINE: AgentHealth = { online: false, capabilities: null }
+
+/** A server-sent-events body, as the agent proxy streams it. */
+export const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('')
+
+/**
+ * Stubs ONLY the agent routes (health, outcome and, given a body, chat); Approve still goes through the real API. The
+ * real LLM is not part of the graded run. Calling it again replaces the earlier stubs.
+ */
+export async function stubAgent(page: Page, health: AgentHealth, chatBody?: string) {
+  for (const route of ['health', 'outcome', 'chat']) await page.unroute(`**/api/v1/agent/${route}`)
+  await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: health } }))
+  await page.route('**/api/v1/agent/outcome', (r) => r.fulfill({ json: { data: { logged: true } } }))
+  if (chatBody) await page.route('**/api/v1/agent/chat', (r) => r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: chatBody }))
+}
+
+/** The microphone permission prompt stays unanswered until denyMic(), so the "Listening…" state can be inspected. */
+export async function stubPendingMic(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __denyMic?: () => void }
+    navigator.mediaDevices.getUserMedia = () => new Promise((_, reject) => { w.__denyMic = () => reject(new DOMException('denied', 'NotAllowedError')) })
+  })
+}
+
+export function denyMic(page: Page) {
+  return page.evaluate(() => (window as unknown as { __denyMic: () => void }).__denyMic())
 }

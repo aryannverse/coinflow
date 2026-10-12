@@ -1,7 +1,10 @@
 import { resolve } from 'node:path'
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { e2e2Email, e2eEmail, hasE2E2User, seedFriends, signInOnboarded, withSql } from './helpers'
+import {
+  AGENT_OFFLINE, AGENT_ONLINE, denyMic, e2e2Email, e2eEmail, hasE2E2User, seedFriends, settleAnimations, signInOnboarded, sse,
+  stubAgent, stubPendingMic, withSql,
+} from './helpers'
 
 /**
  * Screens for docs/hci/part-b-c-rationale.md. Runs only with CAPTURE=1, against a production build (`pnpm build && pnpm
@@ -9,17 +12,8 @@ import { e2e2Email, e2eEmail, hasE2E2User, seedFriends, signInOnboarded, withSql
  * as Part A's screens. E2E accounts only; the agent is stubbed as in agent.spec.ts (no LLM is part of the graded run).
  */
 const SCREENS = resolve(__dirname, '../../../docs/hci/screens')
-const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('')
-const ONLINE = { online: true, capabilities: { chat: true, vision: true, stt: true, tts: true } }
-
-async function settle(page: Page) {
-  await page.waitForLoadState('networkidle')
-  await expect.poll(() => page.evaluate(() => document.getAnimations()
-    .filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length)).toBe(0)
-}
-
 async function shot(page: Page, name: string, isMobile: boolean) {
-  await settle(page)
+  await settleAnimations(page)
   await page.screenshot({ path: `${SCREENS}/${name}-${isMobile ? 390 : 1440}.png` })
 }
 
@@ -31,8 +25,8 @@ test('@capture Parts B and C screens', async ({ browser, isMobile }) => {
   const ctx = await browser.newContext(contextOptions)
   const page = await ctx.newPage()
   await setupClerkTestingToken({ page })
-  // The pill as it reads with the assistant running (stubbed); c-offline shows the other state.
-  await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: ONLINE } }))
+  // The pill as it reads with the assistant running (stubbed); c-offline shows the stubbed offline state.
+  await stubAgent(page, AGENT_ONLINE)
   await signInOnboarded(page)
   // The other project's run left its notifications (its group is gone, the bell rows are not): start from an empty bell.
   await withSql((sql) => sql`delete from notifications where user_id in (select id from users where email in (${e2eEmail()}, ${e2e2Email()}))`)
@@ -91,19 +85,25 @@ test('@capture Parts B and C screens', async ({ browser, isMobile }) => {
   await page.keyboard.press('Escape')
   await expect(sheet).toBeHidden()
 
-  // b-balances-why: one "Why?" open, plus the graph.
+  // b-balances-why: one "Why?" open.
   await page.goto(`/groups/${g.id}?tab=balances`)
   await expect(page.getByText('Asha pays you ₹200', { exact: true })).toBeVisible()
   await page.getByText('Why?').first().click()
   await expect(page.getByText(/^Asha pays you ₹200: Asha owes ₹300/)).toBeVisible()
   await shot(page, 'b-balances-why', isMobile)
 
+  // b-balances-graph: the same payments as a map, scrolled into the middle of the viewport (clear of the Ask pill).
+  const graph = page.getByRole('figure').filter({ hasText: 'The same payments as a map' })
+  await graph.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await expect(graph.locator('.react-flow__edge')).toHaveCount(2)
+  await shot(page, 'b-balances-graph', isMobile)
+
   // The second person (same viewport, theme and motion), on the invite link.
   const invite = (await (await page.request.get(`/api/v1/groups/${g.id}/invite`)).json()).data.url as string
   const ctx2 = await browser.newContext(contextOptions)
   const page2 = await ctx2.newPage()
   await setupClerkTestingToken({ page: page2 })
-  await page2.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: ONLINE } }))
+  await stubAgent(page2, AGENT_ONLINE)
   await signInOnboarded(page2, 50_000, e2e2Email())
   await page2.goto(new URL(invite).pathname)
   await expect(page2.getByRole('heading', { level: 1, name: 'Join Goa trip' })).toBeVisible()
@@ -141,16 +141,12 @@ test('@capture Parts B and C screens', async ({ browser, isMobile }) => {
     id: crypto.randomUUID(), kind: 'expense', summary: 'Expense ₹250 · Food & Dining · “Lunch”',
     payload: { type: 'expense', amount: 25_000, categoryId: food, note: 'Lunch', method: 'upi', source: 'chat' },
   }
-  await page.route('**/api/v1/agent/outcome', (r) => r.fulfill({ json: { data: { logged: true } } }))
-  await page.route('**/api/v1/agent/chat', (r) => r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: sse([
+  await stubAgent(page, AGENT_ONLINE, sse([
     ['status', { state: 'thinking' }], ['token', { text: 'I’ve drafted ₹250 for lunch under Food & Dining. Nothing is saved until you approve it.' }],
     ['proposal', proposal], ['done', { threadId: 'main' }],
-  ]) }))
-  // The microphone prompt never answers until the spec says so: "Listening…" shows while it is pending (spec §4.7).
-  await page.addInitScript(() => {
-    const w = window as unknown as { __denyMic?: () => void }
-    navigator.mediaDevices.getUserMedia = () => new Promise((_, reject) => { w.__denyMic = () => reject(new DOMException('denied', 'NotAllowedError')) })
-  })
+  ]))
+  // The microphone prompt never answers until denyMic(): "Listening…" shows while it is pending (spec §4.7).
+  await stubPendingMic(page)
   await page.goto('/home')
   await page.getByRole('button', { name: /^Ask Coinflow…/ }).click()
   const panel = page.getByRole('dialog', { name: 'Ask Coinflow' })
@@ -165,13 +161,12 @@ test('@capture Parts B and C screens', async ({ browser, isMobile }) => {
   await page.keyboard.down('Space')
   await expect(page.locator('#agent-status')).toHaveText('Listening…')
   await shot(page, 'c-voice-status', isMobile)
-  await page.evaluate(() => (window as unknown as { __denyMic: () => void }).__denyMic())
+  await denyMic(page)
   await page.keyboard.up('Space')
   await expect(panel.getByRole('alert').filter({ hasText: 'The microphone is blocked' })).toBeVisible()
 
-  // c-offline: the pill reads "Assistant offline" and the rest of the app works.
-  await page.unroute('**/api/v1/agent/health')
-  await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: { online: false, capabilities: null } } }))
+  // c-offline: health stubbed offline (what the real local setup reports: no LLM configured). The pill says so.
+  await stubAgent(page, AGENT_OFFLINE)
   await page.goto('/home')
   await expect(page.getByRole('button', { name: /Assistant offline/ })).toBeVisible()
   await shot(page, 'c-offline', isMobile)

@@ -67,7 +67,9 @@ test('event → multi-payer subset expense → claim → balances → mark paid 
   await page2.goto(invitePath)
   await expect(page2.getByRole('heading', { level: 1, name: `Join ${name}` })).toBeVisible()
   // A claim is final, so nothing is preselected, and "Join group" without a choice explains itself inline.
-  for (const radio of await page2.getByRole('radio').all()) await expect(radio).not.toBeChecked()
+  const radios = page2.getByRole('radio')
+  await expect(radios).toHaveCount(4) // Asha, Ravi, Dev and "I’m not listed": the loop below can't pass vacuously
+  for (const radio of await radios.all()) await expect(radio).not.toBeChecked()
   await page2.getByRole('button', { name: 'Join group' }).click()
   await expect(page2.getByRole('alert').filter({ hasText: 'Pick which one is you' })).toBeVisible()
   await expect(page2).toHaveURL(new RegExp(`${invitePath}$`))
@@ -95,9 +97,14 @@ test('event → multi-payer subset expense → claim → balances → mark paid 
   await page.getByRole('button', { name: /^Notifications, \d+ unread$/ }).click()
   await page.getByRole('button', { name: 'Confirm' }).first().click()
   await expect(page.getByText('Payment confirmed')).toBeVisible()
-  // The notification links to this same group's ?tab=balances: a soft navigation that must switch the tab.
-  await page.getByRole('link', { name: /says they paid you ₹200/ }).click()
+  // The buttons leave once answered; focus stays on that notification instead of dropping to <body>.
+  const paid = page.getByRole('link', { name: /says they paid you ₹200/ })
+  await expect(paid).toBeFocused()
+  // The notification links to this same group's ?tab=balances: a soft navigation (no reload) that must switch the tab.
+  await page.evaluate(() => { (window as unknown as { __noReload?: number }).__noReload = 1 })
+  await paid.click()
   await expect(page.getByRole('tab', { name: 'Balances', selected: true })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { __noReload?: number }).__noReload)).toBe(1)
   await expect(page.getByText('Asha pays Ravi ₹100', { exact: true })).toBeVisible()
   await expect(page.getByText('Asha pays you ₹200', { exact: true })).toHaveCount(0)
   await ctx2.close()

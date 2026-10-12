@@ -1,18 +1,10 @@
-import { expect, test, type Page } from '@playwright/test'
-import { e2eEmail, serviceToken, signInOnboarded, withSql } from './helpers'
+import { expect, test } from '@playwright/test'
+import { AGENT_OFFLINE, denyMic, e2eEmail, serviceToken, signInOnboarded, sse, stubAgent, stubPendingMic, withSql } from './helpers'
 
 /**
- * Part C with a STUBBED agent: the real LLM is not part of the graded run (none is configured locally). The stubs
- * replace only the agent routes (/api/v1/agent/health, /chat, /outcome); Approve still goes through the real API.
+ * Part C with a STUBBED agent: the real LLM is not part of the graded run (none is configured locally). stubAgent
+ * replaces only the agent routes (/api/v1/agent/health, /chat, /outcome); Approve still goes through the real API.
  */
-const sse = (events: [string, unknown][]) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('')
-type Health = { online: boolean; capabilities: { chat: boolean; vision: boolean; stt: boolean; tts: boolean } | null }
-
-async function stubAgent(page: Page, health: Health, chatBody?: string) {
-  await page.route('**/api/v1/agent/health', (r) => r.fulfill({ json: { data: health } }))
-  await page.route('**/api/v1/agent/outcome', (r) => r.fulfill({ json: { data: { logged: true } } }))
-  if (chatBody) await page.route('**/api/v1/agent/chat', (r) => r.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: chatBody }))
-}
 
 test('a proposal is staged, then Approve saves it through the normal API with undo', async ({ page }) => {
   await signInOnboarded(page)
@@ -41,7 +33,7 @@ test('a proposal is staged, then Approve saves it through the normal API with un
 
 test('assistant offline: the pill says so, and quick add still works', async ({ page }) => {
   await signInOnboarded(page)
-  await stubAgent(page, { online: false, capabilities: null })
+  await stubAgent(page, AGENT_OFFLINE)
   await page.goto('/home')
   const pill = page.getByRole('button', { name: /Assistant offline/ })
   await expect(pill).toBeVisible()
@@ -70,11 +62,7 @@ test('a coach nudge written through the internal endpoint shows in the bell', as
 test('hold to talk shows "Listening…" as unobscured text at once; a blocked mic explains itself', async ({ page }) => {
   await signInOnboarded(page)
   await stubAgent(page, { online: true, capabilities: { chat: true, vision: false, stt: true, tts: false } })
-  // The permission prompt stays unanswered until the test denies it, so the "Listening…" state can be inspected.
-  await page.addInitScript(() => {
-    const w = window as unknown as { __denyMic?: () => void }
-    navigator.mediaDevices.getUserMedia = () => new Promise((_, reject) => { w.__denyMic = () => reject(new DOMException('denied', 'NotAllowedError')) })
-  })
+  await stubPendingMic(page)
   await page.goto('/home')
   await page.getByRole('button', { name: /^Ask Coinflow…/ }).click()
   const panel = page.getByRole('dialog', { name: 'Ask Coinflow' })
@@ -94,7 +82,7 @@ test('hold to talk shows "Listening…" as unobscured text at once; a blocked mi
     return t.left < m.right && m.left < t.right && t.top < m.bottom && m.top < t.bottom
   })
   expect(overlap).toBe(false)
-  await page.evaluate(() => (window as unknown as { __denyMic: () => void }).__denyMic())
+  await denyMic(page)
   await page.keyboard.up('Space')
   await expect(panel.getByRole('alert').filter({ hasText: 'The microphone is blocked' })).toBeVisible()
   await expect(status).toHaveText('')
