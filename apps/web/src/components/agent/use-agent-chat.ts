@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useReducer, useRef } from 'react'
 import { chatReducer, initialChat, type ChatStatus, type ProposalState, type Source } from '@/lib/agent-chat'
+import type { PlanProgress } from '@/lib/proposal-apply'
 import { createSSEParser } from '@/lib/sse'
 
 export type AgentRouteContext = { route: string; groupId?: string }
@@ -58,7 +59,10 @@ export function useAgentChat() {
   }, [])
 
   const setStatus = useCallback((status: ChatStatus) => dispatch({ type: 'status', status }), [])
-  const markProposal = useCallback((id: string, s: ProposalState, error?: string) => dispatch({ type: 'proposal', id, state: s, error }), [])
+  const markProposal = useCallback(
+    (id: string, s: ProposalState, error?: string, progress?: PlanProgress) => dispatch({ type: 'proposal', id, state: s, error, progress }),
+    [],
+  )
   const reset = useCallback(() => {
     abortRef.current?.abort()
     threadRef.current = newThreadId()

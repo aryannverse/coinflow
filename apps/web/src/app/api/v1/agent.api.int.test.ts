@@ -13,6 +13,8 @@ import { createGroup } from '@/server/services/groups/groups'
 import * as digest from '@/app/api/internal/coach/digest/route'
 import * as coachPost from '@/app/api/internal/notifications/route'
 import * as me from './me/route'
+import * as txns from './transactions/route'
+import * as txn from './transactions/[id]/route'
 import * as chat from './agent/chat/route'
 import * as health from './agent/health/route'
 
@@ -54,6 +56,23 @@ describe('agent bridge', () => {
     const valid = signInternalToken('user_a')
     delete process.env.AGENT_SHARED_SECRET
     expect((await me.GET(new Request(url('/me'), withToken(valid)))).status).toBe(401)
+  })
+
+  it('the AI never writes: an internal token reads (GET 200) but every write is refused with 403 read_only', async () => {
+    const token = signInternalToken('user_a')
+    expect((await me.GET(new Request(url('/me'), withToken(token)))).status).toBe(200)
+    expect((await txns.GET(new Request(url('/transactions'), withToken(token)))).status).toBe(200)
+    const id = '99999999-9999-4999-8999-999999999999'
+    const attempts = [
+      txns.POST(new Request(url('/transactions'), withToken(token, json({ type: 'expense', amount: 100, categoryId: food })))),
+      me.PATCH(new Request(url('/me'), withToken(token, { ...json({ name: 'Hacked' }), method: 'PATCH' }))),
+      txn.DELETE(new Request(url(`/transactions/${id}`), withToken(token, { method: 'DELETE' })), { params: Promise.resolve({ id }) }),
+    ]
+    for (const res of await Promise.all(attempts)) {
+      expect(res.status).toBe(403)
+      expect((await res.json()).error.code).toBe('read_only')
+    }
+    expect((await (await me.GET(new Request(url('/me'), withToken(token)))).json()).data.name).toBe('Yash')
   })
 
   it('chat streams through and drops proposals that fail the API schemas or name a non-member', async () => {

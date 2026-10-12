@@ -1,12 +1,14 @@
+import type { PlanProgress } from './proposal-apply'
 import type { ProposalInput } from './schemas/proposals'
 import type { SSEEvent } from './sse'
 
 export type Source = 'chat' | 'voice' | 'scan'
-export type ProposalState = 'pending' | 'saving' | 'approved' | 'dismissed' | 'failed'
+/** `editing`: Edit opened the matching sheet; the chip no longer offers Approve, so nothing is saved twice. */
+export type ProposalState = 'pending' | 'saving' | 'approved' | 'dismissed' | 'failed' | 'editing'
 export type ChatItem =
   | { id: string; role: 'user'; text: string; source: Source }
   | { id: string; role: 'assistant'; text: string; done: boolean }
-  | { id: string; role: 'proposal'; proposal: ProposalInput; state: ProposalState; error?: string }
+  | { id: string; role: 'proposal'; proposal: ProposalInput; state: ProposalState; error?: string; progress?: PlanProgress }
   | { id: string; role: 'error'; code: string; message: string; retry: { text: string; source: Source } | null }
 export type ChatStatus = 'idle' | 'listening' | 'transcribing' | 'reading' | 'thinking'
 export type ChatState = {
@@ -16,7 +18,7 @@ export type ChatAction =
   | { type: 'send'; id: string; text: string; source: Source }
   | { type: 'event'; id: string; event: SSEEvent }
   | { type: 'status'; status: ChatStatus }
-  | { type: 'proposal'; id: string; state: ProposalState; error?: string }
+  | { type: 'proposal'; id: string; state: ProposalState; error?: string; progress?: PlanProgress }
   | { type: 'fail'; id: string; code: string; message: string }
   | { type: 'reset'; threadId: string }
 
@@ -43,7 +45,10 @@ export function chatReducer(s: ChatState, a: ChatAction): ChatState {
     case 'status':
       return { ...s, status: a.status, toolLabel: a.status === 'thinking' ? s.toolLabel : null }
     case 'proposal':
-      return { ...s, items: s.items.map((it) => (it.id === a.id && it.role === 'proposal' ? { ...it, state: a.state, error: a.error } : it)) }
+      return {
+        ...s,
+        items: s.items.map((it) => (it.id === a.id && it.role === 'proposal' ? { ...it, state: a.state, error: a.error, progress: a.progress ?? it.progress } : it)),
+      }
     case 'fail':
       return { ...s, status: 'idle', toolLabel: null, items: [...s.items, { id: a.id, role: 'error', code: a.code, message: a.message, retry: s.lastUser }] }
     case 'reset':

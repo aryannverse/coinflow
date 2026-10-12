@@ -47,3 +47,52 @@ export function receiptNotice(r: ReceiptDTO): string | undefined {
   if (r.confidence < 0.6) return 'Some numbers may be misread. Please check them before saving.'
   return undefined
 }
+
+type PlanProposal = Extract<ProposalInput, { kind: 'plan_bundle' }>
+/** How far an approved plan got: kept on the chip so a retry never creates a second group. */
+export type PlanProgress = { groupId?: string; budgetsDone?: number }
+
+/** What the chip says once approved. Only ledger saves have an undo toast; groups and reminders don't, so no promise. */
+export function approvedText(p: ProposalInput): string {
+  switch (p.kind) {
+    case 'settle_reminder':
+      return 'Reminder opened. You send it yourself.'
+    case 'group_event':
+      return 'Group created.'
+    case 'plan_bundle': {
+      const n = p.payload.budgets.length
+      return n ? `Plan saved: group created and ${n} budget${n === 1 ? '' : 's'} set.` : 'Plan saved: group created.'
+    }
+    default:
+      return 'Saved. You can undo from the toast.'
+  }
+}
+
+/** A plan sets monthly plans too; the chip shows each one before Approve. */
+export function planBudgetLines(p: PlanProposal, catName: (id: string) => string): string[] {
+  return p.payload.budgets.map((b) => `Sets ${catName(b.categoryId)} plan to ${formatINR(b.monthlyLimit)}/month`)
+}
+
+/** Creates the plan's group once, then the budgets not yet set, reporting progress after each step. */
+export async function applyPlanBundle(
+  p: PlanProposal,
+  progress: PlanProgress,
+  deps: {
+    createGroup: (body: PlanProposal['payload']['event']) => Promise<{ id: string }>
+    upsertBudget: (b: { categoryId: string; monthlyLimit: number }) => Promise<unknown>
+    onProgress: (pr: Required<PlanProgress>) => void
+  },
+): Promise<string> {
+  let groupId = progress.groupId
+  let done = progress.budgetsDone ?? 0
+  if (!groupId) {
+    groupId = (await deps.createGroup(p.payload.event)).id
+    done = 0
+    deps.onProgress({ groupId, budgetsDone: 0 })
+  }
+  for (let i = done; i < p.payload.budgets.length; i++) {
+    await deps.upsertBudget(p.payload.budgets[i])
+    deps.onProgress({ groupId, budgetsDone: i + 1 })
+  }
+  return groupId
+}

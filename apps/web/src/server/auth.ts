@@ -16,10 +16,21 @@ export interface ClerkProfileLike {
 
 const unauthorized = () => new AppError('unauthorized', 'Please sign in to continue.', 401)
 
-/** A verified internal token's user (spec §4.2). Server-only; null when absent, invalid, or the secret is unset. */
+const READ_METHODS = new Set(['GET', 'HEAD'])
+
+/**
+ * A verified internal token's user (spec §4.2). Server-only; null when absent, invalid, or the secret is unset.
+ * Spec §4.4 "the AI never writes": the agent's token may only read. A write carrying a valid one is refused with
+ * 403 `read_only` (the usual {error:{code,message}} shape) instead of falling back to Clerk; approvals are saved by
+ * the person's own browser session.
+ */
 function internalUserId(req?: Request): string | null {
   const token = req ? bearer(req) : null
-  return token ? verifyInternalToken(token, AUD_USER) : null
+  const userId = token ? verifyInternalToken(token, AUD_USER) : null
+  if (userId && !READ_METHODS.has(req!.method.toUpperCase())) {
+    throw new AppError('read_only', 'The assistant can only read. Approve its draft in Coinflow to save it.', 403)
+  }
+  return userId
 }
 
 export async function requireUserId(req?: Request): Promise<string> {

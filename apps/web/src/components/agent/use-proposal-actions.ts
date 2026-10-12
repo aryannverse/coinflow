@@ -6,7 +6,7 @@ import { useCreateGroup, useCreateGroupExpense } from '@/hooks/group-queries'
 import { useCategories, useCreateRecurring, useCreateTransaction, useUpsertBudget } from '@/hooks/queries'
 import { api } from '@/lib/api-client'
 import { draftFromBody } from '@/lib/expense-form'
-import { quickAddPrefill } from '@/lib/proposal-apply'
+import { applyPlanBundle, quickAddPrefill, type PlanProgress } from '@/lib/proposal-apply'
 import type { RecurringCreate } from '@/lib/schemas/recurring'
 import type { GroupExpenseBody } from '@/lib/schemas/groups'
 import type { ProposalInput } from '@/lib/schemas/proposals'
@@ -29,7 +29,8 @@ export function useProposalActions() {
   const log = (p: ProposalInput, outcome: 'approved' | 'dismissed' | 'edited') =>
     void api('/agent/outcome', { method: 'POST', json: { threadId: agent.chat.threadId(), proposalId: p.id, outcome, summary: p.summary } }).catch(() => undefined)
 
-  async function approve(p: ProposalInput): Promise<void> {
+  /** `progress`/`onProgress`: a plan remembers what already saved, so Approve after a failure retries only the rest. */
+  async function approve(p: ProposalInput, opts: { progress?: PlanProgress; onProgress?: (pr: PlanProgress) => void } = {}): Promise<void> {
     switch (p.kind) {
       case 'expense':
       case 'income': {
@@ -57,10 +58,13 @@ export function useProposalActions() {
         sheets.openReminder({ groupId: p.groupId, fromMemberId: p.payload.memberId, amountPaise: p.payload.amountPaise })
         break
       case 'plan_bundle': {
-        const g = await createGroup.mutateAsync(p.payload.event)
-        for (const b of p.payload.budgets) await upsertBudget.mutateAsync({ categoryId: b.categoryId, monthlyLimit: b.monthlyLimit, name: catName(b.categoryId) })
+        const groupId = await applyPlanBundle(p, opts.progress ?? {}, {
+          createGroup: (body) => createGroup.mutateAsync(body),
+          upsertBudget: (b) => upsertBudget.mutateAsync({ categoryId: b.categoryId, monthlyLimit: b.monthlyLimit, name: catName(b.categoryId) }),
+          onProgress: (pr) => opts.onProgress?.(pr),
+        })
         agent.close()
-        router.push(`/groups/${g.id}`)
+        router.push(`/groups/${groupId}`)
         break
       }
     }
@@ -96,5 +100,5 @@ export function useProposalActions() {
     }
   }
 
-  return { approve, edit, dismiss: (p: ProposalInput) => log(p, 'dismissed') }
+  return { approve, edit, dismiss: (p: ProposalInput) => log(p, 'dismissed'), catName }
 }

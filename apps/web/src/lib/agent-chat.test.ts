@@ -42,4 +42,14 @@ describe('chatReducer', () => {
   it('reset starts a fresh thread', () => {
     expect(run([{ type: 'send', id: 'u', text: 'x', source: 'chat' }, { type: 'reset', threadId: 't2' }])).toEqual(initialChat('t2'))
   })
+  it('Edit moves a chip to editing (no Approve), and plan progress survives a failed retry', () => {
+    const s0 = run([ev('proposal', { id: 'p1', kind: 'plan_bundle', summary: 'Plan', payload: {} })])
+    expect(run([{ type: 'proposal', id: 'p1', state: 'editing' }], s0).items[0]).toMatchObject({ state: 'editing' })
+    const s1 = run([
+      { type: 'proposal', id: 'p1', state: 'saving', progress: { groupId: 'g1', budgetsDone: 0 } },
+      { type: 'proposal', id: 'p1', state: 'saving', progress: { groupId: 'g1', budgetsDone: 1 } },
+      { type: 'proposal', id: 'p1', state: 'failed', error: 'Nope' },
+    ], s0)
+    expect(s1.items[0]).toMatchObject({ state: 'failed', error: 'Nope', progress: { groupId: 'g1', budgetsDone: 1 } })
+  })
 })
