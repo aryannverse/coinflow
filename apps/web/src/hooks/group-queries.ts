@@ -8,7 +8,7 @@ import type {
 } from '@/lib/api-types'
 import { formatINR } from '@/lib/money'
 import type { GroupCreateBody, GroupExpenseBody, GroupPatch, MemberCreate, MemberPatch, SettlementCreate } from '@/lib/schemas/groups'
-import { qk, useLedgerMutation } from './queries'
+import { qk, useLedgerMutation, type LedgerOpts } from './queries'
 
 export const gk = {
   all: ['groups'] as const,
@@ -24,6 +24,8 @@ export const gk = {
 /** Group changes also move mirrors, so the personal ledger keys refresh too (via useLedgerMutation's own list). */
 const GROUP_KEYS: QueryKey[] = [gk.all, gk.notifications]
 const LEDGER: QueryKey[] = [['transactions'], qk.sts, qk.budgets, ['insights']]
+/** What a live notification refreshes: the bell, the group (balances), and Home (mirrors and Safe-to-Spend). */
+export const STREAM_KEYS: QueryKey[] = [gk.notifications, gk.all, qk.sts, ['transactions']]
 type NotificationsPage = { data: NotificationDTO[]; unreadCount: number; nextCursor: number | null }
 
 export const useGroups = (initial?: GroupSummaryDTO[]) =>
@@ -61,11 +63,13 @@ export const useNotifications = (pollMs: number | false) =>
   useQuery({ queryKey: gk.notifications, queryFn: () => api<NotificationsPage>('/notifications'), refetchInterval: pollMs })
 
 // ── Ledger mutations: undo toast (spec §3.6) ──────────────────────────────────────────────────────
-export const useCreateGroupExpense = () =>
+export const useCreateGroupExpense = (opts?: LedgerOpts) =>
   useLedgerMutation(
     (v: { groupId: string; body: GroupExpenseBody }) => api<Mutation<GroupExpenseDTO>>(`/groups/${v.groupId}/expenses`, { method: 'POST', json: v.body }),
     (v) => `Added ${formatINR(v.body.amountPaise)} ${v.body.description}`,
     GROUP_KEYS,
+    undefined,
+    opts,
   )
 export const useUpdateGroupExpense = () =>
   useLedgerMutation(
@@ -102,7 +106,7 @@ export const useAddPlaceholder = () =>
  */
 function useGroupMutation<V, R>(
   fn: (v: V) => Promise<R>,
-  opts: { success?: (v: V, r: R) => string; inlineFieldErrors?: boolean; keys?: QueryKey[] } = {},
+  opts: { success?: (v: V, r: R) => string; inlineFieldErrors?: boolean; keys?: QueryKey[] } & LedgerOpts = {},
 ) {
   const qc = useQueryClient()
   return useMutation({
@@ -113,13 +117,14 @@ function useGroupMutation<V, R>(
     },
     onError: (err) => {
       if (err instanceof ApiError && (err.status === 401 || (opts.inlineFieldErrors && err.field))) return
+      if (opts.chip) return // the agent chip shows the failure and owns the retry
       toast.error(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.')
     },
   })
 }
 
-export const useCreateGroup = () =>
-  useGroupMutation((body: GroupCreateBody) => api<{ data: GroupDetailDTO }>('/groups', { method: 'POST', json: body }).then((r) => r.data), { inlineFieldErrors: true })
+export const useCreateGroup = (opts?: LedgerOpts) =>
+  useGroupMutation((body: GroupCreateBody) => api<{ data: GroupDetailDTO }>('/groups', { method: 'POST', json: body }).then((r) => r.data), { inlineFieldErrors: true, ...opts })
 export const useUpdateGroup = () =>
   useGroupMutation((v: { groupId: string; patch: GroupPatch }) => api<{ data: GroupDetailDTO }>(`/groups/${v.groupId}`, { method: 'PATCH', json: v.patch }), { inlineFieldErrors: true, success: () => 'Saved' })
 export const useArchiveGroup = () =>

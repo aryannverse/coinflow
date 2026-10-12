@@ -8,6 +8,7 @@ import type {
   BudgetDTO, CategoryDTO, CheckinDTO, InsightsDTO, MeDTO, Mutation, RecurringDTO, SafeToSpendDTO, TransactionDTO,
 } from '@/lib/api-types'
 import { formatINR } from '@/lib/money'
+import { ledgerErrorToast } from '@/lib/mutation-errors'
 import { buildOptimisticTransaction, isOptimisticId, prependToFirstPage, removeFromPages } from '@/lib/optimistic'
 import type { MePatch } from '@/lib/schemas/me'
 import type { RecurringCreate, RecurringPatch } from '@/lib/schemas/recurring'
@@ -55,11 +56,15 @@ async function snapshotTransactions(qc: QueryClient): Promise<Snapshot> {
   return qc.getQueriesData({ queryKey: TXN_ROOT })
 }
 
+/** `chip`: started from an agent proposal chip, which shows its own failure and retry (see ledgerErrorToast). */
+export type LedgerOpts = { chip?: boolean }
+
 export function useLedgerMutation<TVars, TRes extends Mutation>(
   fn: (v: TVars) => Promise<TRes>,
   label: (v: TVars, r: TRes) => string,
   extraKeys: QueryKey[] = [],
   optimistic?: Optimistic<TVars>,
+  opts: LedgerOpts = {},
 ) {
   const qc = useQueryClient()
   const invalidate = () => {
@@ -79,12 +84,11 @@ export function useLedgerMutation<TVars, TRes extends Mutation>(
     },
     onError: (err, vars, snapshot) => {
       for (const [key, data] of snapshot ?? []) qc.setQueryData(key, data)
-      if (isSignedOut(err)) return
-      if (err instanceof ApiError && err.field) return // the form shows a field error inline
-      toast.error(err instanceof ApiError ? err.message : 'Something went wrong.', {
-        description: err instanceof ApiError && err.requestId ? `Ref ${err.requestId}` : undefined,
-        // A still-saving temp id can never succeed on retry, so that message stands alone.
-        action: err instanceof ApiError && err.code === 'still_saving' ? undefined : { label: 'Retry', onClick: () => mutation.mutate(vars) },
+      const shown = ledgerErrorToast(err, opts)
+      if (!shown) return
+      toast.error(shown.message, {
+        description: shown.description,
+        action: shown.retry ? { label: 'Retry', onClick: () => mutation.mutate(vars) } : undefined,
       })
     },
     // Optimistic edits are always reconciled with the server, success or not.
@@ -139,12 +143,13 @@ const dropRow: Optimistic<{ id: string; amount: number }> = (qc, v) => {
   qc.setQueriesData<InfiniteData<TxnPage> | TransactionDTO[]>({ queryKey: TXN_ROOT }, (old) => removeFromPages(old, v.id))
 }
 
-export const useCreateTransaction = () =>
+export const useCreateTransaction = (opts?: LedgerOpts) =>
   useLedgerMutation(
     (v: TxnInput) => api<Mutation<TransactionDTO>>('/transactions', { method: 'POST', json: v }),
     (v) => `Added ${formatINR(v.amount)} ${verb(v)}`,
     [],
     addTempRow,
+    opts,
   )
 export const useUpdateTransaction = () =>
   useLedgerMutation(
@@ -168,8 +173,8 @@ export const useConfirmDraft = () =>
   useLedgerMutation((t: { id: string; name: string }) => api<Mutation>(`/transactions/${t.id}/confirm`, { method: 'POST' }), (t) => `Confirmed ${t.name}`)
 export const useSkipDraft = () =>
   useLedgerMutation((t: { id: string; name: string }) => api<Mutation>(`/transactions/${t.id}/skip`, { method: 'POST' }), (t) => `Skipped ${t.name}`)
-export const useCreateRecurring = () =>
-  useLedgerMutation((v: RecurringCreate) => api<Mutation<RecurringDTO>>('/recurring', { method: 'POST', json: v }), (v) => `Scheduled ${v.name}`, [qk.recurring])
+export const useCreateRecurring = (opts?: LedgerOpts) =>
+  useLedgerMutation((v: RecurringCreate) => api<Mutation<RecurringDTO>>('/recurring', { method: 'POST', json: v }), (v) => `Scheduled ${v.name}`, [qk.recurring], undefined, opts)
 export const useUpdateRecurring = () =>
   useLedgerMutation(
     // `label` names the change in the undo toast ("Paused Rent"); a plain edit reads "Updated Rent".
@@ -178,10 +183,13 @@ export const useUpdateRecurring = () =>
   )
 export const useDeleteRecurring = () =>
   useLedgerMutation((v: { id: string; name: string }) => api<Mutation>(`/recurring/${v.id}`, { method: 'DELETE' }), (v) => `Removed ${v.name}`, [qk.recurring])
-export const useUpsertBudget = () =>
+export const useUpsertBudget = (opts?: LedgerOpts) =>
   useLedgerMutation(
     (v: { categoryId: string; monthlyLimit: number; name: string }) => api<Mutation>(`/budgets/${v.categoryId}`, { method: 'PUT', json: { monthlyLimit: v.monthlyLimit } }),
     (v) => `${v.name} plan set to ${formatINR(v.monthlyLimit)}`,
+    [],
+    undefined,
+    opts,
   )
 export const useDeleteBudget = () =>
   useLedgerMutation((v: { categoryId: string; name: string }) => api<Mutation>(`/budgets/${v.categoryId}`, { method: 'DELETE' }), (v) => `Removed ${v.name} plan`)

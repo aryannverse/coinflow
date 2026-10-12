@@ -18,11 +18,13 @@ export function useProposalActions() {
   const router = useRouter()
   const quick = useQuickAdd()
   const sheets = useGroupSheets()
-  const createTxn = useCreateTransaction()
-  const createGroupExpense = useCreateGroupExpense()
-  const createRecurring = useCreateRecurring()
-  const upsertBudget = useUpsertBudget()
-  const createGroup = useCreateGroup()
+  // `chip`: a failed Approve shows on the chip, whose Approve is the one retry; no toast Retry beside it (duplicate saves).
+  const chip = { chip: true }
+  const createTxn = useCreateTransaction(chip)
+  const createGroupExpense = useCreateGroupExpense(chip)
+  const createRecurring = useCreateRecurring(chip)
+  const upsertBudget = useUpsertBudget(chip)
+  const createGroup = useCreateGroup(chip)
   const { data: categories = [] } = useCategories()
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Category'
 

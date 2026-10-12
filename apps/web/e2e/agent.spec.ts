@@ -31,6 +31,41 @@ test('a proposal is staged, then Approve saves it through the normal API with un
   expect(list.data[0]).toMatchObject({ note: 'E2E lunch', amount: 25_000, source: 'chat' })
 })
 
+test('a failed Approve is retried from the chip only: no toast Retry that could save it a second time', async ({ page }) => {
+  await signInOnboarded(page)
+  const cats = await (await page.request.get('/api/v1/categories?kind=expense')).json()
+  const food = cats.data.find((c: { name: string }) => c.name === 'Food & Dining').id
+  const proposal = {
+    id: crypto.randomUUID(), kind: 'expense', summary: 'Expense ₹180 · Food & Dining · “E2E retry”',
+    payload: { type: 'expense', amount: 18_000, categoryId: food, note: 'E2E retry', method: 'upi', source: 'chat' },
+  }
+  await stubAgent(page, { online: true, capabilities: { chat: true, vision: false, stt: false, tts: false } },
+    sse([['proposal', proposal], ['done', { threadId: 'main' }]]))
+  let failNext = true
+  await page.route('**/api/v1/transactions', (route) => {
+    if (route.request().method() !== 'POST' || !failNext) return route.fallback()
+    failNext = false
+    return route.fulfill({ status: 500, json: { error: { code: 'server_error', message: 'Couldn’t reach the server.' }, requestId: 'e2e' } })
+  })
+  await page.goto('/home')
+  await page.getByRole('button', { name: /^Ask Coinflow…/ }).click()
+  const panel = page.getByRole('dialog', { name: 'Ask Coinflow' })
+  await panel.getByLabel('Message').fill('180 lunch')
+  await panel.getByRole('button', { name: 'Send' }).click()
+  const chip = panel.getByRole('article', { name: /^Expense proposal:/ })
+  await chip.getByRole('button', { name: 'Approve' }).click()
+  await expect(chip.getByRole('alert')).toHaveText('Couldn’t reach the server.')
+  await page.waitForTimeout(500) // a toast would have been raised in the same tick as the chip's failure
+  // CSS, not roles: the open panel is modal, so a toast behind it is aria-hidden (yet clickable once it closes).
+  // A one-shot count, not toHaveCount(0): that retries, and would pass once the toast timed out by itself.
+  expect(await page.locator('[data-sonner-toast]').filter({ hasText: 'Couldn’t reach the server.' }).count()).toBe(0)
+  expect(await page.locator('[data-sonner-toast] button').filter({ hasText: 'Retry' }).count()).toBe(0)
+  await chip.getByRole('button', { name: 'Approve' }).click() // the one retry path
+  await expect(chip.getByText('Saved. You can undo from the toast.')).toBeVisible()
+  const list = await (await page.request.get('/api/v1/transactions')).json()
+  expect(list.data.filter((t: { note: string | null }) => t.note === 'E2E retry')).toHaveLength(1)
+})
+
 test('assistant offline: the pill says so, and quick add still works', async ({ page }) => {
   await signInOnboarded(page)
   await stubAgent(page, AGENT_OFFLINE)

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import type { GroupMemberDTO } from '@/lib/api-types'
 import type { ExpenseDraft, ItemDraft, Preview } from '@/lib/expense-form'
 import { formatINR, parseRupeesToPaise } from '@/lib/money'
+import { uid } from '@/lib/uid'
 import { cn } from '@/lib/utils'
 import { MemberAvatar } from './member-avatar'
 import { MoneyInput } from './money-input'
@@ -126,7 +127,7 @@ export function ReceiptCanvas({ members, draft, preview, error, errorField, onCh
         })}
       </ul>
       <Button type="button" variant="outline" className="min-h-12 self-start rounded-chip active:scale-[0.97]"
-        onClick={() => setItems([...items, { key: crypto.randomUUID(), name: '', amount: '', memberIds: [] }])}>
+        onClick={() => setItems([...items, { key: uid(), name: '', amount: '', memberIds: [] }])}>
         <Plus className="size-4" aria-hidden /> Add item
       </Button>
       <div className="grid grid-cols-3 gap-2">
