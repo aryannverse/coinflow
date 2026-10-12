@@ -2,7 +2,7 @@ import 'server-only'
 import { and, desc, eq, gte, isNull } from 'drizzle-orm'
 import { getDb, type Tx } from '@/server/db/client'
 import { pgErrorCode } from '@/server/db/errors'
-import { auditLog, balanceCheckins, budgets, recurringItems, transactions } from '@/server/db/schema'
+import { auditLog, balanceCheckins, budgets, groups, recurringItems, transactions, type AuditRow } from '@/server/db/schema'
 import { conflict, notFound } from '@/server/errors'
 import { undoGroupChange } from './groups/undo'
 
@@ -19,6 +19,16 @@ const TABLES: Record<PersonalEntity, typeof transactions | typeof recurringItems
   recurring_item: recurringItems,
   budget: budgets,
   balance_checkin: balanceCheckins,
+}
+
+/** The group a group-entity audit row belongs to: an expense snapshot nests it, settlement and member rows carry it. */
+function groupIdOf(entry: AuditRow): string | null {
+  for (const side of [entry.after, entry.before] as (Record<string, unknown> | null)[]) {
+    const expense = side?.expense as { groupId?: unknown } | undefined
+    const id = expense?.groupId ?? side?.groupId
+    if (typeof id === 'string') return id
+  }
+  return null
 }
 
 const DATE_KEYS = new Set(['createdAt', 'updatedAt', 'occurredAt', 'deletedAt', 'takenAt'])
@@ -75,6 +85,10 @@ export async function undo(
       throw conflict('undo_expired', 'It’s too late to undo that change.')
     }
     const groupEntity = GROUP_ENTITIES.has(entry.entity)
+    // Group writes serialise on the group row. Take it BEFORE the staleness check, so a co-member's edit that is
+    // in flight either lands first (and this undo is stale) or waits for it (Review Focus #3).
+    const groupId = groupEntity ? groupIdOf(entry) : null
+    if (groupId) await tx.select({ id: groups.id }).from(groups).where(eq(groups.id, groupId)).for('update')
     const [latest] = await tx
       .select({ id: auditLog.id })
       .from(auditLog)
@@ -87,7 +101,15 @@ export async function undo(
     if (latest.id !== entry.id) throw conflict('undo_stale', 'That item changed again, so this undo no longer applies.')
 
     if (groupEntity) {
-      const { before, after } = await undoGroupChange(tx, entry, userId, now)
+      let change: Awaited<ReturnType<typeof undoGroupChange>>
+      try {
+        change = await undoGroupChange(tx, entry, userId, now)
+      } catch (err) {
+        // A row it needs was taken or is still referenced (e.g. a member someone has since put on an expense).
+        if (pgErrorCode(err) === '23503' || pgErrorCode(err) === '23505') throw conflict('undo_conflict', 'Something newer is in the way, so this can’t be undone.')
+        throw err
+      }
+      const { before, after } = change
       const restoreId = await recordAudit(tx, { userId, entity: entry.entity, entityId: entry.entityId, action: 'restore', before, after })
       return { entity: entry.entity, entityId: entry.entityId, auditId: restoreId }
     }

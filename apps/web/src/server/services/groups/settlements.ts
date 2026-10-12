@@ -59,7 +59,7 @@ export async function resolveSettlement(userId: string, settlementId: string, de
   return getDb().transaction(async (tx) => {
     const [s] = await tx.select().from(settlements).where(eq(settlements.id, settlementId)).for('update')
     if (!s) throw notFound('payment')
-    const { group, me } = await requireMember(userId, s.groupId, tx)
+    const { group, me } = await requireMember(userId, s.groupId, tx, { write: true })
     if (s.toMember !== me.id) throw new AppError('not_payee', 'Only the person who was paid can confirm this.', 403)
     if (s.status !== 'pending') {
       throw conflict('settlement_state', s.status === 'confirmed' ? 'This payment is already confirmed.' : 'This payment was already marked as not received.')

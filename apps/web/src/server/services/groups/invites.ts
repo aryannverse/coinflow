@@ -17,8 +17,8 @@ import type { InviteLink, InvitePreview } from './types'
 export const inviteInvalid = () => new AppError('invite_invalid', 'This invite link has expired or was replaced. Ask for a new one.', 404)
 
 function inviteSecret(): string {
-  const s = process.env.INVITE_SECRET
-  if (!s || s.length < 16) throw new AppError('invite_unconfigured', 'Invites aren’t set up on this server yet (INVITE_SECRET).', 500)
+  const s = process.env.INVITE_SECRET // ≥ 32 chars, as .env.example says
+  if (!s || s.length < 32) throw new AppError('invite_unconfigured', 'Invites aren’t set up on this server yet (INVITE_SECRET).', 500)
   return s
 }
 
@@ -39,7 +39,7 @@ export async function createInviteRow(tx: Tx, groupId: string, userId: string): 
 
 export async function getInvite(userId: string, groupId: string): Promise<InviteLink> {
   return getDb().transaction(async (tx) => {
-    await requireMember(userId, groupId, tx, { lock: true })
+    await requireMember(userId, groupId, tx, { lock: true, write: false }) // showing the link is a read; an archived group's link is dead anyway
     const [active] = await tx.select().from(groupInvites).where(and(eq(groupInvites.groupId, groupId), isNull(groupInvites.revokedAt)))
     return active ? { url: inviteUrl(inviteToken(active.id)), createdAt: active.createdAt } : createInviteRow(tx, groupId, userId)
   })
@@ -100,6 +100,15 @@ export async function claimInvite(userId: string, token: string, body: ClaimBody
           .where(and(eq(groupMembers.id, ph.id), isNull(groupMembers.userId))).returning()
         if (!member) throw taken()
       } else {
+        // Names are unique per group, like addPlaceholder. A clash with a placeholder is most likely them.
+        const live = await tx.select({ displayName: groupMembers.displayName, userId: groupMembers.userId }).from(groupMembers)
+          .where(and(eq(groupMembers.groupId, group.id), isNull(groupMembers.removedAt)))
+        const same = live.find((m) => m.displayName.trim().toLowerCase() === body.newName.trim().toLowerCase())
+        if (same) {
+          throw new AppError('duplicate_member', same.userId
+            ? `There’s already a ${same.displayName} in this group. Add an initial so people can tell you apart.`
+            : `There’s already a ${same.displayName} here — is that you? Pick the name above.`, 409, 'newName')
+        }
         ;[member] = await tx.insert(groupMembers)
           .values({ groupId: group.id, userId, displayName: body.newName, role: 'member', addedBy: userId, claimedAt: now }).returning()
       }

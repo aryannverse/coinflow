@@ -9,7 +9,7 @@ import { dropSettlementRequest, wake } from '../notifications'
 import { recordActivity } from './activity'
 import { syncExpenseMirrors } from './mirrors'
 import { requireMember } from './permissions'
-import { loadSnapshot, writeChildren, type ExpenseSnapshot } from './rows'
+import { listMemberRows, loadSnapshot, writeChildren, type ExpenseSnapshot } from './rows'
 
 const DATE_KEYS = ['occurredAt', 'createdAt', 'updatedAt', 'deletedAt'] as const
 function reviveExpense(json: Record<string, unknown>): GroupExpense {
@@ -21,8 +21,8 @@ function reviveExpense(json: Record<string, unknown>): GroupExpense {
 const blocked = (message = 'Something newer is in the way, so this can’t be undone.') => conflict('undo_conflict', message)
 
 /**
- * Spec §3.6. The caller (audit.undo) has already checked: same user, ≤ 30 s, and that this is the latest audit row
- * for the entity across ALL members. Returns the before/after for the 'restore' audit row.
+ * Spec §3.6. The caller (audit.undo) has already locked the group row and then checked: same user, ≤ 30 s, and that
+ * this is the latest audit row for the entity across ALL members. Returns the before/after for the 'restore' audit row.
  */
 export async function undoGroupChange(tx: Tx, entry: AuditRow, userId: string, now: Date): Promise<{ before: object | null; after: object | null }> {
   switch (entry.entity) {
@@ -31,6 +31,11 @@ export async function undoGroupChange(tx: Tx, entry: AuditRow, userId: string, n
       if (!current) throw notFound('change')
       const { me } = await requireMember(userId, current.expense.groupId, tx, { lock: true }) // left the group since → 404
       const before = entry.before as unknown as ExpenseSnapshot | null
+      // Undo moves the nets of everyone on either version. Someone removed since must stay at zero (spec §3.2).
+      const touched = new Set([current, before].flatMap((snap) =>
+        !snap || snap.expense.deletedAt ? [] : [...snap.payers, ...snap.shares].map((r) => r.memberId)))
+      const gone = (await listMemberRows(tx, current.expense.groupId)).find((m) => m.removedAt && touched.has(m.id))
+      if (gone) throw blocked(`${gone.displayName} has left the group since, so this can’t be undone.`)
       if (!before) {
         await tx.update(groupExpenses).set({ deletedAt: now }).where(eq(groupExpenses.id, entry.entityId))
       } else {
@@ -59,7 +64,7 @@ export async function undoGroupChange(tx: Tx, entry: AuditRow, userId: string, n
       if (entry.action !== 'create') throw blocked()
       const [s] = await tx.select().from(settlements).where(eq(settlements.id, entry.entityId)).for('update')
       if (!s) throw notFound('change')
-      const { me } = await requireMember(userId, s.groupId, tx)
+      const { me } = await requireMember(userId, s.groupId, tx, { write: true })
       if (s.status !== 'pending') throw conflict('settlement_state', 'They’ve already answered this payment, so it can’t be undone.')
       await dropSettlementRequest(tx, s.id)
       await tx.delete(settlements).where(eq(settlements.id, s.id))
@@ -70,7 +75,7 @@ export async function undoGroupChange(tx: Tx, entry: AuditRow, userId: string, n
       if (entry.action !== 'create') throw blocked()
       const [m] = await tx.select().from(groupMembers).where(eq(groupMembers.id, entry.entityId)).for('update')
       if (!m) throw notFound('change')
-      await requireMember(userId, m.groupId, tx)
+      await requireMember(userId, m.groupId, tx, { write: true })
       // A placeholder that someone has since claimed is final. A friend added directly (spec §3.8) was claimed in this
       // very audit row, so it can still be undone until they are part of an expense or settlement (the FK says so).
       const addedClaimed = Boolean((entry.after as { claimedAt?: string | null } | null)?.claimedAt)

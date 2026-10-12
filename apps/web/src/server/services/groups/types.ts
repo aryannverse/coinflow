@@ -14,6 +14,7 @@ export type MemberView = {
   avatarUrl: string | null
   upiId: string | null // claimed: their profile UPI ID; placeholder: typed by a member
   upiQrUrl: string | null // claimed members only (their uploaded QR, readable by co-members)
+  upiSetByName: string | null // placeholders only: the member who typed their UPI ID
   isMe: boolean
 }
 type GroupFields = Pick<Group, 'id' | 'name' | 'emoji' | 'color' | 'kind' | 'startsOn' | 'endsOn' | 'archivedAt' | 'createdAt'>

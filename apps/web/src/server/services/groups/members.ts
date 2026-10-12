@@ -1,11 +1,11 @@
 import 'server-only'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, or } from 'drizzle-orm'
 import { formatINR } from '@/lib/money'
 import type { FriendUserBody } from '@/lib/schemas/friends'
 import type { MemberCreate, MemberPatch } from '@/lib/schemas/groups'
 import { getDb } from '@/server/db/client'
 import { pgErrorCode } from '@/server/db/errors'
-import { groupMembers, type GroupMember } from '@/server/db/schema'
+import { groupMembers, settlements, type GroupMember } from '@/server/db/schema'
 import { AppError, conflict, invalid, notFound } from '@/server/errors'
 import { recordAudit } from '../audit'
 import { displayNameOf, requireFriend } from '../friends'
@@ -33,7 +33,7 @@ export async function addPlaceholder(userId: string, groupId: string, body: Memb
     if (nameTaken(await listMemberRows(tx, groupId), body.displayName)) {
       throw conflict('duplicate_member', `There’s already someone called ${body.displayName} here.`)
     }
-    const [row] = await tx.insert(groupMembers).values({ groupId, displayName: body.displayName, upiId: body.upiId ?? null, addedBy: userId }).returning()
+    const [row] = await tx.insert(groupMembers).values({ groupId, displayName: body.displayName, upiId: body.upiId ?? null, upiSetBy: body.upiId ? userId : null, addedBy: userId }).returning()
     await recordActivity(tx, { groupId, actorUserId: userId, kind: 'member_added', summary: `${me.displayName} added ${row.displayName}`, payload: { memberId: row.id } })
     const auditId = await recordAudit(tx, { userId, entity: 'group_member', entityId: row.id, action: 'create', before: null, after: row })
     const data = (await memberViews(tx, groupId, userId)).find((m) => m.id === row.id) as MemberView
@@ -51,10 +51,23 @@ export async function updateMember(userId: string, groupId: string, memberId: st
       if (target.userId !== userId && me.role !== 'creator') throw new AppError('creator_only', 'Only they or the group’s creator can rename them.', 403)
       if (patch.upiId !== undefined) throw invalid('upiId', 'Members set their UPI ID in their own profile.')
     }
+    // Settle-ups go to this ID, so it isn't anyone's to change: only whoever added the placeholder, or the creator.
+    const upiChanged = patch.upiId !== undefined && (patch.upiId ?? null) !== target.upiId
+    if (upiChanged && target.addedBy !== userId && me.role !== 'creator') {
+      throw new AppError('creator_only', `Only the person who added ${target.displayName} or the group’s creator can change their UPI ID.`, 403, 'upiId')
+    }
     if (patch.displayName && nameTaken(members, patch.displayName, target.id)) {
       throw conflict('duplicate_member', `There’s already someone called ${patch.displayName} here.`)
     }
-    await tx.update(groupMembers).set(patch).where(eq(groupMembers.id, target.id))
+    await tx.update(groupMembers).set(upiChanged ? { ...patch, upiSetBy: patch.upiId ? userId : null } : patch).where(eq(groupMembers.id, target.id))
+    if (upiChanged) {
+      const name = patch.displayName ?? target.displayName
+      await recordActivity(tx, {
+        groupId, actorUserId: userId, kind: 'member_updated',
+        summary: patch.upiId ? `${me.displayName} set ${name}’s UPI ID` : `${me.displayName} removed ${name}’s UPI ID`,
+        payload: { memberId: target.id, field: 'upiId' },
+      })
+    }
     return { data: (await memberViews(tx, groupId, userId)).find((m) => m.id === target.id) as MemberView }
   })
 }
@@ -70,6 +83,14 @@ export async function removeMember(userId: string, groupId: string, memberId: st
     const net = (await memberNets(tx, [target.id])).get(target.id) ?? 0
     if (net !== 0) {
       throw conflict('member_has_balance', `${target.displayName} still has ${formatINR(Math.abs(net))} to settle, so they can’t be removed yet.`)
+    }
+    // A pending payment would move their net once it's confirmed, after they'd gone.
+    const [waiting] = await tx.select().from(settlements).where(and(
+      eq(settlements.groupId, groupId), eq(settlements.status, 'pending'),
+      or(eq(settlements.fromMember, target.id), eq(settlements.toMember, target.id)),
+    ))
+    if (waiting) {
+      throw conflict('member_has_balance', `A ${formatINR(waiting.amountPaise)} payment ${waiting.fromMember === target.id ? 'from' : 'to'} ${target.displayName} is still waiting to be confirmed, so they can’t be removed yet.`)
     }
     await tx.update(groupMembers).set({ removedAt: new Date() }).where(eq(groupMembers.id, target.id))
     await recordActivity(tx, { groupId, actorUserId: userId, kind: 'member_removed', summary: `${me.displayName} removed ${target.displayName}` })

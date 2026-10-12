@@ -2,15 +2,18 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
 import { getDb } from '@/server/db/client'
-import { notifications, transactions } from '@/server/db/schema'
-import { undo } from '../audit'
+import { groupActivity, groupExpenses, groups, notifications, settlements, transactions } from '@/server/db/schema'
+import { recordAudit, undo } from '../audit'
 import { createCheckin } from '../checkins'
 import { getSafeToSpend } from '../safe-to-spend'
 import { getGroupBalances } from './balances'
 import { createGroupExpense, deleteGroupExpense, updateGroupExpense } from './expenses'
-import { createGroup, getGroup, listGroups } from './groups'
-import { claimInvite, getInvite, previewInvite, regenerateInvite } from './invites'
-import { addPlaceholder, removeMember } from './members'
+import { archiveGroup, createGroup, getGroup, listGroups } from './groups'
+import { claimInvite, getInvite, inviteToken, previewInvite, regenerateInvite } from './invites'
+import { addPlaceholder, removeMember, updateMember } from './members'
+import { memberNets } from './nets'
+import { loadSnapshot } from './rows'
+import { markSettlement, resolveSettlement } from './settlements'
 
 const tokenOf = (url: string) => url.split('/join/')[1]
 const liveMirrors = (userId: string) =>
@@ -187,5 +190,121 @@ describe('groups, invites and expense mirrors', () => {
     const neha = await addPlaceholder('user_a', t.groupId, { displayName: 'Neha' })
     await claimInvite('user_c', t.token, { memberId: neha.data.id })
     await expect(undo('user_a', neha.auditId)).rejects.toMatchObject({ code: 'undo_conflict', status: 409 })
+  })
+
+  // ── Final-review fixes ──────────────────────────────────────────────────────────────────────────
+
+  it('undo waits for the group lock, so a co-member edit committed meanwhile makes it stale (Review Focus #3)', async () => {
+    const t = await goaTrip()
+    await claimInvite('user_b', t.token, { memberId: t.asha })
+    const { data, auditId } = await createGroupExpense('user_a', t.groupId, dinner(t))
+    let pending!: Promise<unknown>
+    // Asha's edit is in flight: it holds the group lock (as every group write does) when the undo arrives.
+    await getDb().transaction(async (tx) => {
+      await tx.select({ id: groups.id }).from(groups).where(eq(groups.id, t.groupId)).for('update')
+      pending = undo('user_a', auditId).then(() => 'undone', (err: unknown) => err)
+      await new Promise((r) => setTimeout(r, 300)) // the undo has run its checks by now, or is waiting for the lock
+      const before = await loadSnapshot(tx, data.id)
+      await tx.update(groupExpenses).set({ description: 'Dinner at Thalassa' }).where(eq(groupExpenses.id, data.id))
+      await recordAudit(tx, { userId: 'user_b', entity: 'group_expense', entityId: data.id, action: 'update', before, after: await loadSnapshot(tx, data.id) })
+    })
+    expect(await pending).toMatchObject({ code: 'undo_stale', status: 409 })
+    const [row] = await getDb().select().from(groupExpenses).where(eq(groupExpenses.id, data.id))
+    expect(row).toMatchObject({ description: 'Dinner at Thalassa', deletedAt: null }) // her edit stands
+  })
+
+  it('undoing a member add that an expense now uses is a plain undo_conflict, not a server error', async () => {
+    const t = await goaTrip()
+    const kiran = await addPlaceholder('user_a', t.groupId, { displayName: 'Kiran' })
+    await createGroupExpense('user_a', t.groupId, dinner(t, { split: { mode: 'equal', memberIds: [t.me, kiran.data.id, t.ravi] } }))
+    await expect(undo('user_a', kiran.auditId)).rejects.toMatchObject({ code: 'undo_conflict', status: 409, message: expect.stringContaining('Kiran') })
+  })
+
+  it('nobody with a payment still waiting to be confirmed can be removed, either side of it', async () => {
+    const t = await goaTrip()
+    await claimInvite('user_b', t.token, { memberId: t.asha })
+    await markSettlement('user_b', t.groupId, { fromMemberId: t.asha, toMemberId: t.me, amountPaise: 10_000 }) // Asha's net is 0
+    await markSettlement('user_a', t.groupId, { fromMemberId: t.me, toMemberId: t.dev, amountPaise: 5_000 }) // to a placeholder
+    await expect(removeMember('user_a', t.groupId, t.asha))
+      .rejects.toMatchObject({ code: 'member_has_balance', status: 409, message: expect.stringContaining('₹100') })
+    await expect(removeMember('user_a', t.groupId, t.dev))
+      .rejects.toMatchObject({ code: 'member_has_balance', status: 409, message: expect.stringContaining('₹50') })
+  })
+
+  it('undoing an edit can’t bring back someone who has been removed since', async () => {
+    const t = await goaTrip()
+    const { data } = await createGroupExpense('user_a', t.groupId, dinner(t, {
+      amountPaise: 120_000, payers: [{ memberId: t.me, paidPaise: 80_000 }, { memberId: t.ravi, paidPaise: 40_000 }],
+      split: { mode: 'equal', memberIds: [t.me, t.asha, t.ravi, t.dev] },
+    }))
+    const { auditId } = await updateGroupExpense('user_a', t.groupId, data.id, dinner(t)) // Dev edited out: net 0
+    await removeMember('user_a', t.groupId, t.dev)
+    await expect(undo('user_a', auditId)).rejects.toMatchObject({ code: 'undo_conflict', status: 409, message: expect.stringContaining('Dev') })
+    expect((await memberNets(getDb(), [t.dev])).get(t.dev)).toBe(0)
+  })
+
+  it('“I’m not listed” under a name that is already here is refused with a pointer to that name', async () => {
+    const t = await goaTrip()
+    await expect(claimInvite('user_b', t.token, { newName: ' ravi ' })).rejects.toMatchObject({
+      code: 'duplicate_member', status: 409, field: 'newName', message: 'There’s already a Ravi here — is that you? Pick the name above.',
+    })
+    expect((await getGroup('user_a', t.groupId)).members.filter((m) => m.displayName.toLowerCase() === 'ravi')).toHaveLength(1)
+  })
+
+  it('only the creator or whoever added a placeholder sets its UPI ID; changes are in the feed and the payer sees who set it', async () => {
+    const t = await goaTrip()
+    await claimInvite('user_b', t.token, { memberId: t.asha })
+    await expect(updateMember('user_b', t.groupId, t.dev, { upiId: 'mine@okaxis' })).rejects.toMatchObject({ code: 'creator_only', status: 403 })
+    await updateMember('user_b', t.groupId, t.dev, { displayName: 'Dev K' }) // renaming is still anyone's
+    const kiran = await addPlaceholder('user_b', t.groupId, { displayName: 'Kiran' })
+    await updateMember('user_b', t.groupId, kiran.data.id, { upiId: 'kiran@okhdfc' })
+    await updateMember('user_a', t.groupId, t.dev, { upiId: 'dev@oksbi' })
+    const members = (await getGroup('user_a', t.groupId)).members
+    expect(members.find((m) => m.id === kiran.data.id)).toMatchObject({ upiId: 'kiran@okhdfc', upiSetByName: 'Asha' })
+    expect(members.find((m) => m.id === t.dev)).toMatchObject({ upiId: 'dev@oksbi', upiSetByName: 'Yash' })
+    const feed = await getDb().select().from(groupActivity).where(and(eq(groupActivity.groupId, t.groupId), eq(groupActivity.kind, 'member_updated')))
+    expect(feed.map((a) => a.summary).sort()).toEqual(['Asha set Kiran’s UPI ID', 'Yash set Dev K’s UPI ID'])
+  })
+
+  it('a group with money still open can’t be archived; an archived one is read-only and listed only as archived', async () => {
+    const t = await goaTrip()
+    await claimInvite('user_b', t.token, { memberId: t.asha })
+    await createGroupExpense('user_a', t.groupId, {
+      description: 'Chai', amountPaise: 20_000, categoryId: food,
+      payers: [{ memberId: t.me, paidPaise: 20_000 }], split: { mode: 'equal', memberIds: [t.me, t.asha] },
+    })
+    await expect(archiveGroup('user_a', t.groupId)).rejects.toMatchObject({ code: 'group_unsettled', status: 409, message: expect.stringContaining('Asha') })
+    const { data: s } = await markSettlement('user_b', t.groupId, { fromMemberId: t.asha, toMemberId: t.me, amountPaise: 10_000 })
+    await expect(archiveGroup('user_a', t.groupId)).rejects.toMatchObject({ code: 'group_unsettled', status: 409, message: expect.stringContaining('waiting') })
+    await resolveSettlement('user_a', s.id, 'confirmed')
+    await archiveGroup('user_a', t.groupId)
+
+    expect(await listGroups('user_a')).toEqual([])
+    const { data: other } = await createGroup('user_a', { name: 'Flat', placeholders: [] })
+    expect((await listGroups('user_a', { archived: true })).map((g) => g.id)).toEqual([t.groupId])
+    expect((await listGroups('user_a')).map((g) => g.id)).toEqual([other.id])
+    expect((await getGroup('user_b', t.groupId)).archivedAt).not.toBeNull() // reads still work
+    for (const write of [
+      () => createGroupExpense('user_b', t.groupId, dinner(t)),
+      () => addPlaceholder('user_a', t.groupId, { displayName: 'Kiran' }),
+      () => markSettlement('user_b', t.groupId, { fromMemberId: t.asha, toMemberId: t.me, amountPaise: 100 }),
+      () => regenerateInvite('user_a', t.groupId),
+      () => archiveGroup('user_a', t.groupId),
+    ]) {
+      await expect(write()).rejects.toMatchObject({ code: 'group_archived', status: 409 })
+    }
+    expect(await getDb().select().from(settlements).where(eq(settlements.groupId, t.groupId))).toHaveLength(1)
+  })
+
+  it('an INVITE_SECRET shorter than 32 characters is refused, as .env.example says', () => {
+    const saved = process.env.INVITE_SECRET
+    try {
+      process.env.INVITE_SECRET = 'x'.repeat(31)
+      expect(() => inviteToken('00000000-0000-4000-8000-000000000000')).toThrow(expect.objectContaining({ code: 'invite_unconfigured' }))
+      process.env.INVITE_SECRET = 'x'.repeat(32)
+      expect(inviteToken('00000000-0000-4000-8000-000000000000')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    } finally {
+      process.env.INVITE_SECRET = saved
+    }
   })
 })

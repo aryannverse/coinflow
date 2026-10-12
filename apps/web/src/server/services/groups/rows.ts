@@ -66,6 +66,7 @@ export async function memberViews(exec: Exec, groupId: string, viewerId: string)
     .leftJoin(users, eq(users.id, groupMembers.userId))
     .where(eq(groupMembers.groupId, groupId))
     .orderBy(asc(groupMembers.createdAt), asc(groupMembers.id))
+  const nameOfUser = new Map(rows.filter(({ m }) => m.userId).map(({ m }) => [m.userId as string, m.displayName]))
   return rows.map(({ m, avatarUrl, userUpi, userQr }) => ({
     id: m.id,
     userId: m.userId,
@@ -78,6 +79,8 @@ export async function memberViews(exec: Exec, groupId: string, viewerId: string)
     avatarUrl: avatarUrl ?? null,
     upiId: m.userId ? (userUpi ?? null) : m.upiId,
     upiQrUrl: m.userId ? (userQr ?? null) : null,
+    // A placeholder's UPI ID was typed by a member; the payer sees who (null if they've left or deleted their account).
+    upiSetByName: !m.userId && m.upiId && m.upiSetBy ? (nameOfUser.get(m.upiSetBy) ?? null) : null,
     isMe: m.userId === viewerId,
   }))
 }

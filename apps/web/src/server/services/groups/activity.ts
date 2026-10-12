@@ -6,7 +6,7 @@ import { requireMember } from './permissions'
 import { decodeCursor, encodeCursor } from './rows'
 
 export type ActivityKind =
-  | 'group_created' | 'group_updated' | 'member_added' | 'member_claimed' | 'member_removed' | 'invite_regenerated'
+  | 'group_created' | 'group_updated' | 'member_added' | 'member_claimed' | 'member_updated' | 'member_removed' | 'invite_regenerated'
   | 'expense_added' | 'expense_edited' | 'expense_deleted'
   | 'settlement_marked' | 'settlement_recorded' | 'settlement_confirmed' | 'settlement_rejected' | 'undo'
 
