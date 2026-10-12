@@ -10,6 +10,9 @@
     "db:up": "docker compose up -d --wait",
     "db:generate": "pnpm --filter web db:generate",
     "db:migrate": "pnpm --filter web db:migrate",
-    "db:seed:demo": "pnpm --filter web db:seed:demo"
+    "db:seed:demo": "pnpm --filter web db:seed:demo",
+    "agent:dev": "cd apps/agent && uv run uvicorn coinflow_agent.main:app --host 127.0.0.1 --port 8100 --reload",
+    "agent:up": "docker compose --profile agent up -d --build --wait agent",
+    "agent:test": "cd apps/agent && uv run --frozen pytest -q"
   }
 }

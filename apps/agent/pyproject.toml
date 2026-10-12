@@ -1,0 +1,65 @@
+[project]
+name = "coinflow-agent"
+version = "0.1.0"
+description = "Coinflow AI layer: chat agent with proposals, speech, receipts and a gentle coach."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.143.0",
+  "uvicorn[standard]==0.54.0",
+  "python-multipart==0.0.32",
+  "pydantic==2.14.1",
+  "pydantic-settings==2.15.0",
+  "httpx==0.28.1",
+  "pyjwt==2.15.1",
+  "langchain==1.4.4",
+  "langchain-core==1.6.9",
+  "langchain-openai==1.7.0",
+  "langgraph==1.2.14",
+  "langgraph-checkpoint-postgres==3.1.2",
+  "psycopg[binary,pool]==3.3.6",
+  "deepagents==0.7.24",
+  "apscheduler==3.11.3",
+]
+
+[project.optional-dependencies]
+# Heavy (CPU torch ≈ 200 MB). Installed in the Docker image; plain `uv sync` (tests, pnpm verify) skips it (plan A13).
+speech = [
+  "faster-whisper==1.2.1",
+  "av==14.2.0",  # faster-whisper 1.2.1 calls av.open(metadata_errors=...), which PyAV 15+ removed; 14.3/14.4 have no wheels on PyPI (sdist-only: needs ffmpeg 7 headers)
+  "kokoro==0.9.4",
+  "torch==2.14.1",
+  # misaki (Kokoro's G2P) pip-installs this spaCy model on first use, and a uv venv has no pip: pin it instead.
+  "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.17.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 130
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]  # ruff format owns line length

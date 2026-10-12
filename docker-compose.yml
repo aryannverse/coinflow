@@ -17,5 +17,27 @@ services:
       timeout: 3s
       retries: 20
 
+  agent:
+    build: ./apps/agent
+    container_name: coinflow-agent
+    profiles: ["agent"] # heavy image: opt in with --profile agent, so `pnpm db:up` stays fast
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: ./apps/agent/.env
+        required: false
+    environment:
+      AGENT_DATABASE_URL: postgresql://coinflow:coinflow@postgres:5432/coinflow
+      COINFLOW_API_URL: http://host.docker.internal:3000 # Next runs on the host with `pnpm dev`
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8100:8100" # localhost only (spec §4.2)
+    volumes:
+      - coinflow_models:/models # faster-whisper / Kokoro downloads survive rebuilds
+
 volumes:
   coinflow_pgdata:
+  coinflow_models:
