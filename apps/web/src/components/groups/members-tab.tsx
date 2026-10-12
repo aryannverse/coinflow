@@ -467,8 +467,9 @@ export function MembersTab({ group }: { group: GroupDetailDTO }) {
   // Friends who are not already live, joined members here (userId is null for placeholders).
   const inGroup = new Set(group.members.filter((m) => !m.removedAt && m.userId).map((m) => m.userId))
   const eligible = all.filter((f) => !inGroup.has(f.userId))
+  // grid-cols-1 = minmax(0, 1fr): an implicit auto column grows to a long unbroken email or name and scrolls the page at 320 px.
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div className="flex flex-col gap-4">
         <InviteCard group={group} />
         <AddPeople group={group} eligible={eligible} hasFriends={all.length > 0} />

@@ -257,7 +257,8 @@ export function FriendsView({ initial }: { initial: FriendsDTO }) {
         <h1 className="font-display text-3xl font-bold">Friends</h1>
         <p className="text-muted-foreground">Friends can add each other to groups straight away — no invite link.</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* grid-cols-1 = minmax(0, 1fr): an implicit auto column grows to a long unbroken email or name and scrolls the page at 320 px. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="flex flex-col gap-4">
           <FindFriend />
           <Requests data={data} />
