@@ -31,6 +31,8 @@ async function expectNoSidewaysScroll(page: Page, path: string, ready: (page: Pa
 
 test.beforeEach(({ isMobile }) => {
   test.skip(!isMobile, 'Reflow is a phone-width check (mobile project).')
+  // Four full page loads (2 widths × 2 motion settings) after a sign-in: give them a triple budget.
+  test.slow()
 })
 
 test('landing page reflows at 390 and 320', { tag: '@public' }, async ({ page }) => {
