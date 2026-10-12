@@ -74,7 +74,7 @@ S = B − R + I − F + G (Part A §4.11), with these changes:
 |---|---|
 | **B** | Subtracts confirmed expenses' **cash** (`amount`), not `personalShare`. This is identical for all Part A data, where share = amount. |
 | **I** | Unchanged. |
-| **G** | Now **group position**: Σ over groups of (my paid − my share + settlements I received − settlements I paid). Positive (owed to me) counts only if `countReceivables`; negative (I owe) always counts. Unclaimed placeholders are not users. |
+| **G** | Now **group position**: Σ over groups of (my paid − my share + settlements I paid − settlements I received). Positive (owed to me) counts only if `countReceivables`; negative (I owe) always counts. Unclaimed placeholders are not users. |
 | Insights / budgets / Top Category | Keep using `personalShare`. Insights *income* excludes `source='settlement'`. |
 
 **Worked example.** I pay ₹3,000 dinner for three:
@@ -95,7 +95,7 @@ Itemized mode:
 - totals must match.
 
 ### 2.6 Balances & simplification
-- **Net per member** = Σ paid − Σ share + Σ settlements received − Σ settlements paid, counting confirmed settlements only.
+- **Net per member** = Σ paid − Σ share + Σ settlements paid − Σ settlements received, counting confirmed settlements only (paying a settlement moves you toward 0 from below; receiving one moves you toward 0 from above).
 - **Simplification** uses a greedy **min-cash-flow** (largest debtor pays largest creditor, repeat). It produces ≤ N−1 payments in < 50 ms for 50 members.
 - **"Why" explanations.** Each suggested payment carries a "why": the contributing expenses and the netting chain, stored as a computed structure, not persisted. Example: "Asha pays you ₹1,200: she owes ₹2,000 across Bowling and Dinner; you are owed ₹1,200 and Ravi ₹800."
 - **Pending settlements** (marked, not yet confirmed) are shown but do not change balances until confirmed.
