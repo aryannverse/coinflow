@@ -22,6 +22,7 @@ export const transactionCreateSchema = z.object({
   ...transactionFields,
   method: method.default('upi'),
   occurredAt: occurredAt.default(() => new Date()),
+  source: z.enum(['manual', 'chat', 'voice', 'scan']).optional(), // spec §4.4: approved AI proposals keep their origin
 }).strict()
 
 // Built from the default-free fields so a partial edit never injects method/occurredAt defaults.

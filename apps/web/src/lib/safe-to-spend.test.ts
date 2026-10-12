@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeSafeToSpend, type SafeToSpendInput } from './safe-to-spend'
+import { computeSafeToSpend, groupPositionTerm, type SafeToSpendInput } from './safe-to-spend'
 
 const base: SafeToSpendInput = {
   today: '2026-10-11',
@@ -8,7 +8,7 @@ const base: SafeToSpendInput = {
   receivables: 0,
   checkin: { amount: 5_000_000 }, // ₹50,000
   confirmedIncomeSinceCheckin: 0,
-  confirmedExpenseShareSinceCheckin: 124_000, // ₹1,240
+  confirmedExpenseCashSinceCheckin: 124_000, // ₹1,240
   pendingBillDrafts: 0,
   pendingIncomeDrafts: 0,
   recurring: [
@@ -56,5 +56,30 @@ describe('computeSafeToSpend', () => {
 
   it('adds receivables (Part B hook)', () => {
     expect(computeSafeToSpend({ ...base, receivables: 10_000 }).amount).toBe(4_884_649)
+  })
+})
+
+describe('groupPositionTerm (G, spec §2.4)', () => {
+  it('counts what you owe always, and what you are owed only when allowed — per group', () => {
+    expect(groupPositionTerm([200_000, -60_000], true)).toBe(140_000)
+    expect(groupPositionTerm([200_000, -60_000], false)).toBe(-60_000)
+    expect(groupPositionTerm([], true)).toBe(0)
+  })
+
+  it('worked example: settling never changes S', () => {
+    // I pay ₹3,000 dinner for three (after my check-in). B −3,000, G +2,000.
+    const me = { ...base, recurring: [], fixedCostsEstimate: 0, confirmedExpenseCashSinceCheckin: 300_000 }
+    const meBefore = computeSafeToSpend({ ...me, receivables: groupPositionTerm([200_000], true) })
+    // A friend's ₹1,000 confirmed settlement reaches me: income +1,000 in B, G falls to +1,000.
+    const meAfter = computeSafeToSpend({ ...me, confirmedIncomeSinceCheckin: 100_000, receivables: groupPositionTerm([100_000], true) })
+    expect(meAfter.amount).toBe(meBefore.amount)
+    expect(meBefore.amount).toBe(5_000_000 - 300_000 + 200_000) // S moved by −₹1,000, my share
+
+    // The friend: G −1,000; after paying, B −1,000 (cash) and G 0.
+    const friend = { ...base, recurring: [], fixedCostsEstimate: 0, confirmedExpenseCashSinceCheckin: 0 }
+    const fBefore = computeSafeToSpend({ ...friend, receivables: groupPositionTerm([-100_000], true) })
+    const fAfter = computeSafeToSpend({ ...friend, confirmedExpenseCashSinceCheckin: 100_000, receivables: groupPositionTerm([0], true) })
+    expect(fAfter.amount).toBe(fBefore.amount)
+    expect(fBefore.amount).toBe(5_000_000 - 100_000)
   })
 })

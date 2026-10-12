@@ -15,10 +15,12 @@ export interface SafeToSpendInput {
   today: ISODate
   paydayDay: number
   fixedCostsEstimate: number
+  /** G from `groupPositionTerm` (spec §2.4): Σ group positions, owing always, owed only when counted. */
   receivables: number
   checkin: { amount: number } | null
   confirmedIncomeSinceCheckin: number
-  confirmedExpenseShareSinceCheckin: number
+  /** Cash that left the account (`transactions.amount`), not the personal share (spec §2.4: B subtracts cash). */
+  confirmedExpenseCashSinceCheckin: number
   pendingBillDrafts: number
   pendingIncomeDrafts: number
   recurring: RecurringLike[]
@@ -44,7 +46,7 @@ function scheduled(input: SafeToSpendInput, kind: RecurringLike['kind'], cycleEn
 export function computeSafeToSpend(input: SafeToSpendInput): SafeToSpendResult {
   const cycle = payCycle(input.today, input.paydayDay)
   const balance = input.checkin
-    ? input.checkin.amount + input.confirmedIncomeSinceCheckin - input.confirmedExpenseShareSinceCheckin
+    ? input.checkin.amount + input.confirmedIncomeSinceCheckin - input.confirmedExpenseCashSinceCheckin
     : 0
   const committedOut = scheduled(input, 'bill', cycle.cycleEnd) + input.pendingBillDrafts
   const committedIn = scheduled(input, 'income', cycle.cycleEnd) + input.pendingIncomeDrafts
@@ -56,4 +58,12 @@ export function computeSafeToSpend(input: SafeToSpendInput): SafeToSpendResult {
 
   const amount = balance - committedOut + committedIn - fixedRemaining + input.receivables
   return { status: 'ok', amount, dailyPace: Math.floor(Math.max(amount, 0) / cycle.daysLeft), ...common }
+}
+
+/**
+ * G, the group position term (spec §2.4): Σ over groups of my net. Owing always counts; being owed counts only
+ * when the user allows it (`countReceivables`). Applied per group, so a receivable never hides a debt elsewhere.
+ */
+export function groupPositionTerm(positions: number[], countReceivables: boolean): number {
+  return positions.reduce((s, p) => s + (p > 0 ? (countReceivables ? p : 0) : p), 0)
 }

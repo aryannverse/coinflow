@@ -18,4 +18,10 @@ describe('mePatchSchema', () => {
     expect(mePatchSchema.safeParse({ paydayDay: 0 }).success).toBe(false)
     expect(mePatchSchema.safeParse({ paydayDay: 32 }).success).toBe(false)
   })
+
+  it('validates coach quiet hours and the Part B toggles', () => {
+    expect(mePatchSchema.safeParse({ quietHours: { start: '22:00', end: '07:00' }, coachEnabled: false, countReceivables: false }).success).toBe(true)
+    expect(mePatchSchema.safeParse({ quietHours: { start: '25:00', end: '07:00' } }).success).toBe(false)
+    expect(mePatchSchema.safeParse({ quietHours: null }).success).toBe(true)
+  })
 })

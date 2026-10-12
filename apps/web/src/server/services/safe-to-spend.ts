@@ -67,7 +67,7 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
     receivables: 0, // Part B
     checkin: checkin ? { amount: checkin.amount } : null,
     confirmedIncomeSinceCheckin: income,
-    confirmedExpenseShareSinceCheckin: expenseShare,
+    confirmedExpenseCashSinceCheckin: expenseShare,
     pendingBillDrafts: billDrafts,
     pendingIncomeDrafts: incomeDrafts,
     recurring: recurring.map((r) => ({
