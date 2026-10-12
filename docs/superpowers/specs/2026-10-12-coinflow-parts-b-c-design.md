@@ -262,7 +262,7 @@ Added at the user's request after the plan was written: "anyone logged in can be
 LLM configuration:
 - `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` select an OpenAI-compatible chat model.
 - **Provider: Groq.** `LLM_BASE_URL=https://api.groq.com/openai/v1` with the user's Groq API key (`gsk_…`, kept only in `apps/agent/.env`).
-  - Chat, tools and the planner use `openai/gpt-oss-120b`, a production model with tool use and strict `json_schema` output.
+  - Chat, tools and the planner use `openai/gpt-oss-20b`, a production model with tool use and strict `json_schema` output. The user chose it over 120b to stay under the free tier's tokens-per-minute limit.
   - Receipts use `qwen/qwen3.8-27b`, Groq's vision model. It is a preview model that supports strict `json_schema`, takes at most 3 images per request, and counts each image as 2,048 tokens.
   - Groq replaces the earlier CLI-proxy idea. Nothing in the code is Groq-specific, so any OpenAI-compatible endpoint still works.
 - `LLM_VISION_MODEL` is optional. When it is unset, receipt scan returns `vision_unavailable`.
