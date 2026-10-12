@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { mePatchSchema, type MePatch } from '@/lib/schemas/me'
 import { getDb } from '@/server/db/client'
 import { pgConstraint, pgErrorCode } from '@/server/db/errors'
-import { users, type User } from '@/server/db/schema'
+import { groups, users, type User } from '@/server/db/schema'
 import { conflict, notFound } from '@/server/errors'
 
 export interface UserProfile {
@@ -45,8 +45,16 @@ export async function upsertUserFromProfile(p: UserProfile): Promise<User> {
   }
 }
 
+/**
+ * Deletes the user and everything that cascades from them. Their own groups go first, in the same transaction: in a
+ * single `delete from users`, Postgres sets both group_members.user_id and .added_by to null on the creator's row while
+ * the group is cascading away, and the second update fails the group_id foreign key.
+ */
 export async function deleteUser(id: string): Promise<void> {
-  await getDb().delete(users).where(eq(users.id, id))
+  await getDb().transaction(async (tx) => {
+    await tx.delete(groups).where(eq(groups.createdBy, id))
+    await tx.delete(users).where(eq(users.id, id))
+  })
 }
 
 export async function updateMe(userId: string, rawPatch: MePatch): Promise<User> {

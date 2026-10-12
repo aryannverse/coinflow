@@ -5,7 +5,10 @@ import { clerkState } from '@test/int/clerk-mock'
 vi.mock('@clerk/nextjs/server', async () => (await import('@test/int/clerk-mock')).clerkModule)
 
 import { requireCurrentUser } from '@/server/auth'
-import { getUser, updateMe, upsertUserFromProfile } from './users'
+import { getDb } from '@/server/db/client'
+import { groupMembers, groups } from '@/server/db/schema'
+import { createGroup } from './groups/groups'
+import { deleteUser, getUser, updateMe, upsertUserFromProfile } from './users'
 
 describe('users service', () => {
   beforeEach(async () => {
@@ -111,5 +114,22 @@ describe('users service', () => {
     await makeUser('user_a')
     await expect(updateMe('user_a', { paydayDay: 99 })).rejects.toThrow()
     await expect(updateMe('user_a', { email: 'x@y.z' } as never)).rejects.toThrow()
+  })
+
+  it('deleteUser removes a user who created a group, with the group, without an FK error (found in E2E reset)', async () => {
+    // Both group_members.user_id and .added_by are SET NULL on the creator's row while the group cascades away in the
+    // same statement; the second update re-checks group_id against a group that is already gone.
+    await makeUser('user_a')
+    await makeUser('user_b')
+    await createGroup('user_a', { name: 'Goa', placeholders: [{ displayName: 'Asha' }] })
+    const { data: theirs } = await createGroup('user_b', { name: 'Flat', placeholders: [] })
+    await getDb().insert(groupMembers).values({ groupId: theirs.id, userId: 'user_a', displayName: 'A', addedBy: 'user_a', claimedAt: new Date() })
+
+    await deleteUser('user_a')
+    expect(await getUser('user_a')).toBeNull()
+    const left = await getDb().select({ name: groups.name }).from(groups)
+    expect(left).toEqual([{ name: 'Flat' }]) // their own group goes; someone else's stays, with their row as a placeholder
+    const members = await getDb().select({ userId: groupMembers.userId, name: groupMembers.displayName }).from(groupMembers)
+    expect(members).toEqual(expect.arrayContaining([{ userId: null, name: 'A' }]))
   })
 })
