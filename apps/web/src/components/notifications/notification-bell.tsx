@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { gk, useAcceptFriend, useDropFriendRequest, useMarkAllRead, useMarkRead, useNotifications, useResolveSettlement } from '@/hooks/group-queries'
+import { STREAM_KEYS, useAcceptFriend, useDropFriendRequest, useMarkAllRead, useMarkRead, useNotifications, useResolveSettlement } from '@/hooks/group-queries'
 import type { NotificationDTO } from '@/lib/api-types'
 import { timeAgo } from '@/lib/group-display'
 import { cn } from '@/lib/utils'
@@ -70,9 +70,9 @@ function Item({ n, onNavigate }: { n: NotificationDTO; onNavigate: () => void })
 export function NotificationBell() {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
+  // A confirmed payment or a co-member's edit changes balances, and my mirrors and Safe-to-Spend on Home.
   const live = useNotificationStream(() => {
-    void qc.invalidateQueries({ queryKey: gk.notifications })
-    void qc.invalidateQueries({ queryKey: gk.all }) // a confirmed payment or a co-member's edit changes balances
+    for (const queryKey of STREAM_KEYS) void qc.invalidateQueries({ queryKey })
   })
   const list = useNotifications(live ? false : 30_000)
   const markAll = useMarkAllRead()

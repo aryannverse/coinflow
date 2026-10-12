@@ -14,7 +14,7 @@ import { useAgent } from './agent-provider'
 export type RecurringPayloadInput = Extract<ProposalInput, { kind: 'recurring' }>['payload']
 export type BudgetPayloadInput = Extract<ProposalInput, { kind: 'budget' }>['payload']
 
-const BODY = 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5 lg:px-6 lg:pb-6 lg:pt-6'
+const BODY = 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-1 lg:px-6 lg:pb-6'
 
 /** Spec §4.4 Edit for proposals with no sheet of their own: the recurring form, or a one-field monthly plan. */
 export function ProposalEditDialogs() {
@@ -28,7 +28,7 @@ export function ProposalEditDialogs() {
     return (
       <SheetFrame open onClose={close} initialFocus="#rf-name">
         <div className={BODY}>
-          <div className="flex flex-col gap-1.5 pr-12">
+          <div className="flex flex-col gap-1.5">
             <DialogTitle className="font-display text-xl">Edit recurring</DialogTitle>
             <DialogDescription>Coinflow drafted this from your chat. Change anything, then save.</DialogDescription>
           </div>
@@ -74,7 +74,7 @@ function BudgetBody({ payload, name, onDone }: { payload: BudgetPayloadInput; na
 
   return (
     <form onSubmit={save} className={BODY} noValidate>
-      <div className="flex flex-col gap-1.5 pr-12">
+      <div className="flex flex-col gap-1.5">
         <DialogTitle className="font-display text-xl">Plan for {name}</DialogTitle>
         <DialogDescription>How much you’d like to spend on {name} each month.</DialogDescription>
       </div>

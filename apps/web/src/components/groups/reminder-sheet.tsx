@@ -35,8 +35,8 @@ function ReminderBody({ group, fromMemberId, amountPaise }: { group: GroupDetail
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-5 lg:px-6 lg:pb-6">
-      <div className="flex flex-col gap-1 pr-12">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-1 lg:px-6 lg:pb-6">
+      <div className="flex flex-col gap-1">
         <DialogTitle className="font-display text-xl">Remind {firstName(name)}</DialogTitle>
         <DialogDescription className="text-sm text-muted-foreground">
           <span className="amount">{formatINR(amountPaise)}</span> · {group.emoji} {group.name}
@@ -78,7 +78,7 @@ export function ReminderSheet({ open, openCount, groupId, fromMemberId, amountPa
       {group.data ? (
         <ReminderBody key={openCount} group={group.data} fromMemberId={fromMemberId} amountPaise={amountPaise} />
       ) : (
-        <div className="p-6">
+        <div className="px-6 pb-6 pt-1">
           <DialogTitle className="sr-only">Send a reminder</DialogTitle>
           <DialogDescription className="sr-only">Loading</DialogDescription>
           <p role="status">Loading…</p>

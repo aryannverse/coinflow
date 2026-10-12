@@ -2,12 +2,13 @@
 import { ArrowRight, HandCoins } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useBalances, useMarkSettlement, useResolveSettlement } from '@/hooks/group-queries'
 import type { GroupDetailDTO, PaymentDTO } from '@/lib/api-types'
-import { paymentHeadline } from '@/lib/group-display'
+import { markedPaise, markedPayment, paymentHeadline, waitingForPayee } from '@/lib/group-display'
 import { formatINR } from '@/lib/money'
 import { whyText } from '@/lib/settle'
 import { cn } from '@/lib/utils'
@@ -75,6 +76,9 @@ export function BalancesTab({ group }: { group: GroupDetailDTO }) {
               const from = byId.get(p.from)
               const to = byId.get(p.to)
               const mine = p.from === me || p.to === me
+              // Already marked (pending): say so, instead of a second "Settle up" that invites paying twice.
+              const marked = p.from === me && to ? markedPayment(pending, me, p.to, to) : null
+              const rest = p.amountPaise - markedPaise(pending, me, p.to)
               return (
                 <li key={`${p.from}-${p.to}`} id={`pay-${i}`}
                   className={cn('scroll-mt-24 rounded-tile border bg-card p-4', mine && 'border-primary/50')}>
@@ -94,9 +98,16 @@ export function BalancesTab({ group }: { group: GroupDetailDTO }) {
                     <p className="rounded-chip bg-surface-2 p-3 text-sm text-muted-foreground">{whyText(p, names, me)}</p>
                   </details>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {p.from === me && to && (
+                    {p.from === me && to && !marked && (
                       <Button className="min-h-12 rounded-chip active:scale-[0.97]" aria-label={`Settle up ${formatINR(p.amountPaise)} with ${to.displayName}`}
                         onClick={() => sheets.openSettle({ groupId: group.id, toMemberId: p.to, amountPaise: p.amountPaise })}>Settle up</Button>
+                    )}
+                    {p.from === me && to && marked && (
+                      <>
+                        <p className="flex min-h-12 w-full items-center text-sm text-muted-foreground">{marked}</p>
+                        <Button variant="outline" className="min-h-12 rounded-chip active:scale-[0.97]" aria-label={`Paid more? Mark another payment to ${to.displayName}`}
+                          onClick={() => sheets.openSettle({ groupId: group.id, toMemberId: p.to, amountPaise: rest > 0 ? rest : p.amountPaise })}>Paid more?</Button>
+                      </>
                     )}
                     {p.to === me && (
                       <Button variant="outline" className="min-h-12 rounded-chip active:scale-[0.97]"
@@ -120,8 +131,9 @@ export function BalancesTab({ group }: { group: GroupDetailDTO }) {
             {pending.map((s) => {
               const amount = formatINR(s.amountPaise)
               const toMe = s.toMember === me
+              const payee = byId.get(s.toMember)
               const text = s.fromMember === me
-                ? `You marked ${amount} paid to ${names.get(s.toMember)}. Waiting for them to confirm.`
+                ? `You marked ${amount} paid to ${names.get(s.toMember)}. ${payee ? waitingForPayee(payee) : ''}`.trim()
                 : toMe ? `${names.get(s.fromMember)} says they paid you ${amount}.` : `${names.get(s.fromMember)} marked ${amount} paid to ${names.get(s.toMember)}.`
               return (
                 <li key={s.id} className="rounded-chip border border-dashed bg-surface-2/60 p-3 text-sm">
@@ -184,11 +196,10 @@ export function BalancesTab({ group }: { group: GroupDetailDTO }) {
                   const r = recording
                   recordBack.redirectTo('bal-h') // the payment row and its button change once it counts
                   setRecording(null)
-                  mark.mutate({
-                    groupId: group.id,
-                    body: { fromMemberId: r.from, toMemberId: me, amountPaise: r.amountPaise },
-                    label: `Recorded ${formatINR(r.amountPaise)} from ${names.get(r.from)}`,
-                  })
+                  const label = `Recorded ${formatINR(r.amountPaise)} from ${names.get(r.from)}`
+                  // Confirmed at once with no undo (plan A7), so no undo toast either: say it worked.
+                  mark.mutate({ groupId: group.id, body: { fromMemberId: r.from, toMemberId: me, amountPaise: r.amountPaise }, label },
+                    { onSuccess: () => toast.success(label) })
                 }}>Record</Button>
               </DialogFooter>
             </>

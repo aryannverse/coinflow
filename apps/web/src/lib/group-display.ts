@@ -49,3 +49,28 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   const hrs = Math.round(mins / 60)
   return hrs < 24 ? `${hrs} h ago` : new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
 }
+
+type Payee = { displayName: string; claimed: boolean }
+
+/** After "I’ve paid": a claimed payee confirms; a placeholder can’t until they join (plan A7), so say that instead. */
+export function waitingForPayee(payee: Payee): string {
+  return payee.claimed
+    ? `Waiting for ${payee.displayName} to confirm.`
+    : `${payee.displayName} hasn’t joined Coinflow yet — they’ll be asked to confirm when they do.`
+}
+
+/** The sum of `fromId`'s pending marks to `toId`. */
+export const markedPaise = (pending: { fromMember: string; toMember: string; amountPaise: number }[], fromId: string, toId: string) =>
+  pending.filter((s) => s.fromMember === fromId && s.toMember === toId).reduce((sum, s) => sum + s.amountPaise, 0)
+
+/**
+ * "Marked ₹200 · waiting for Asha" when `fromId` has pending marks to `toId` (summed), else null. Balances shows it in
+ * place of a second "Settle up" for a payment already marked, since pending marks don't change the suggested payments.
+ */
+export function markedPayment(
+  pending: { fromMember: string; toMember: string; amountPaise: number }[], fromId: string, toId: string, payee: Payee,
+): string | null {
+  const marked = markedPaise(pending, fromId, toId)
+  if (marked === 0) return null
+  return `Marked ${formatINR(marked)} · ${payee.claimed ? `waiting for ${payee.displayName}` : waitingForPayee(payee)}`
+}

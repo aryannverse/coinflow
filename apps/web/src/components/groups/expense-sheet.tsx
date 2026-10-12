@@ -120,8 +120,8 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
 
   return (
     <form ref={formRef} noValidate className="flex min-h-0 flex-1 flex-col" onSubmit={(e) => { e.preventDefault(); void save() }}>
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-4 pt-5 lg:px-6 lg:pt-6">
-        <div className="flex flex-col gap-1 pr-12">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-4 pt-1 lg:px-6">
+        <div className="flex flex-col gap-1">
           <DialogTitle className="font-display text-xl">{expense ? 'Edit expense' : 'Add expense'}</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">{group.emoji} {group.name}</DialogDescription>
         </div>
@@ -245,13 +245,13 @@ export function ExpenseSheet({ open, openCount, groupId, expenseId, prefill, not
       {ready ? (
         <ExpenseForm key={openCount} group={group.data as GroupDetailDTO} expense={existing.data} prefill={prefill} notice={notice} onDone={onClose} />
       ) : group.isError || existing.isError ? (
-        <div className="flex flex-col gap-3 p-6 pr-14" role="alert">
+        <div className="flex flex-col gap-3 px-6 pb-6 pt-1" role="alert">
           <DialogTitle className="font-display text-xl">{expenseId ? 'Edit expense' : 'Add expense'}</DialogTitle>
           <DialogDescription>Couldn’t load this group. Check your connection and try again.</DialogDescription>
           <Button variant="outline" className="min-h-12 self-start rounded-chip" onClick={() => { void group.refetch(); if (expenseId) void existing.refetch() }}>Try again</Button>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 p-6" role="status" aria-label="Loading">
+        <div className="flex flex-col gap-3 px-6 pb-6 pt-1" role="status" aria-label="Loading">
           <DialogTitle className="sr-only">{expenseId ? 'Edit expense' : 'Add expense'}</DialogTitle>
           <DialogDescription className="sr-only">Loading the group</DialogDescription>
           <Skeleton className="h-12 w-40" /><Skeleton className="h-12 w-full" /><Skeleton className="h-32 w-full" />

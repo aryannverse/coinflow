@@ -62,27 +62,30 @@ export function SheetFrame({ open, onClose, initialFocus, size = 'md', children 
     },
     onCloseAutoFocus: focus.props.onCloseAutoFocus,
   }
+  // Its own row that never scrolls: as an overlay it covered whatever scrolled under it (the "Itemized" chip).
   const close = (
-    <DialogClose asChild>
-      <Button variant="ghost" className="absolute right-2 top-2 size-12 rounded-chip bg-popover/80 backdrop-blur active:scale-[0.97]">
-        <X className="size-5" aria-hidden />
-        <span className="sr-only">Close</span>
-      </Button>
-    </DialogClose>
+    <div className="flex shrink-0 justify-end px-2 pt-2">
+      <DialogClose asChild>
+        <Button variant="ghost" className="size-12 rounded-chip active:scale-[0.97]">
+          <X className="size-5" aria-hidden />
+          <span className="sr-only">Close</span>
+        </Button>
+      </DialogClose>
+    </div>
   )
   const width = { sm: 'sm:max-w-sm', md: 'sm:max-w-md', lg: 'sm:max-w-lg' }[size]
   return desktop ? (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent showCloseButton={false} {...contentProps} className={cn('flex max-h-[92dvh] flex-col gap-0 overflow-hidden rounded-tile p-0', width)}>
-        {children}
         {close}
+        {children}
       </DialogContent>
     </Dialog>
   ) : (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side="bottom" showCloseButton={false} {...contentProps} className="flex max-h-[94dvh] flex-col gap-0 overflow-hidden rounded-t-tile p-0">
-        {children}
         {close}
+        {children}
       </SheetContent>
     </Sheet>
   )

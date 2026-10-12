@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { useGroup, useMarkSettlement } from '@/hooks/group-queries'
 import { ApiError } from '@/lib/api-client'
+import { waitingForPayee } from '@/lib/group-display'
 import { formatINR, paiseToRupeeString, parseRupeesToPaise } from '@/lib/money'
 import { MoneyInput } from './money-input'
 import { SheetFrame } from './sheet-frame'
@@ -18,6 +19,7 @@ import { SheetFrame } from './sheet-frame'
 function SettleBody({ groupId, toMemberId, amountPaise, onClose }: { groupId: string; toMemberId: string; amountPaise: number; onClose: () => void }) {
   const group = useGroup(groupId)
   const payee = group.data?.members.find((m) => m.id === toMemberId)
+  const me = group.data?.members.find((m) => m.isMe)
   const mark = useMarkSettlement()
   const [amount, setAmount] = useState(() => paiseToRupeeString(amountPaise))
   const [copied, setCopied] = useState(false)
@@ -26,7 +28,7 @@ function SettleBody({ groupId, toMemberId, amountPaise, onClose }: { groupId: st
   const doneRef = useRef<HTMLButtonElement>(null)
   if (!group.data || !payee) {
     return (
-      <div className="p-6">
+      <div className="px-6 pb-6 pt-1">
         <DialogTitle className="sr-only">Settle up</DialogTitle>
         <DialogDescription className="sr-only">Loading</DialogDescription>
         <p role="status">Loading…</p>
@@ -66,8 +68,8 @@ function SettleBody({ groupId, toMemberId, amountPaise, onClose }: { groupId: st
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5 pt-5 lg:px-6">
-      <div className="pr-12">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5 pt-1 lg:px-6">
+      <div>
         <DialogTitle className="font-display text-xl">Pay {name}</DialogTitle>
         <DialogDescription className="text-sm text-muted-foreground">{group.data.emoji} {group.data.name} · suggested {formatINR(amountPaise)}</DialogDescription>
       </div>
@@ -89,18 +91,26 @@ function SettleBody({ groupId, toMemberId, amountPaise, onClose }: { groupId: st
       )}
 
       {payee.upiId && (
-        <div className="flex min-h-12 items-center gap-2 rounded-chip border bg-surface-2 px-3">
-          <span className="min-w-0 flex-1 truncate font-mono text-sm">{payee.upiId}</span>
-          <Button type="button" variant="ghost" onClick={() => void copy()} className="min-h-12 gap-1.5 rounded-chip active:scale-[0.97]">
-            {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />} Copy UPI ID
-          </Button>
+        <div className="flex flex-col gap-1">
+          <div className="flex min-h-12 items-center gap-2 rounded-chip border bg-surface-2 px-3">
+            <span className="min-w-0 flex-1 truncate font-mono text-sm">{payee.upiId}</span>
+            <Button type="button" variant="ghost" onClick={() => void copy()} className="min-h-12 gap-1.5 rounded-chip active:scale-[0.97]">
+              {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />} Copy UPI ID
+            </Button>
+          </div>
+          {/* A placeholder's ID was typed by a member, not by them: say who, so the payer can check before paying. */}
+          {!payee.claimed && (
+            <p className="text-sm text-muted-foreground">
+              {payee.upiSetByName ? `UPI ID added by ${payee.upiSetByName === me?.displayName ? 'you' : payee.upiSetByName}` : 'UPI ID added by a group member'}. Check it with {name} if you’re unsure.
+            </p>
+          )}
         </div>
       )}
       <p role="status" className="sr-only">{copied ? 'UPI ID copied' : ''}</p>
 
       {done ? (
         <div className="flex flex-col gap-3">
-          <p role="status" className="rounded-chip bg-surface-2 p-3 text-sm">Marked as paid. Waiting for {name} to confirm.</p>
+          <p role="status" className="rounded-chip bg-surface-2 p-3 text-sm">Marked as paid. {waitingForPayee(payee)}</p>
           <Button ref={doneRef} type="button" variant="outline" className="min-h-12 rounded-chip active:scale-[0.97]" onClick={onClose}>Done</Button>
         </div>
       ) : (
@@ -108,7 +118,7 @@ function SettleBody({ groupId, toMemberId, amountPaise, onClose }: { groupId: st
           <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
             <li>Pay in your UPI app.</li>
             <li>Come back and tap “I’ve paid”.</li>
-            <li>{name} confirms when it arrives.</li>
+            <li>{payee.claimed ? `${name} confirms when it arrives.` : `${name} confirms once they join Coinflow.`}</li>
           </ol>
           <MoneyInput id="settle-amount" label="Amount you paid" hideLabel={false} value={amount} invalid={Boolean(error)} onChange={(v) => { setAmount(v); setError(null) }} />
           {error && <p role="alert" className="text-sm text-neutral-negative">{error}</p>}

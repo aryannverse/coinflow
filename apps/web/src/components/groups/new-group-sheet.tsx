@@ -120,8 +120,8 @@ function NewGroupForm({ prefill, onDone }: { prefill?: GroupCreateBody; onDone: 
 
   return (
     <form id="ng-form" noValidate onSubmit={(e) => void submit(e)} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-4 pt-5 lg:px-6 lg:pt-6">
-        <div className="flex flex-col gap-1 pr-12">
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pb-4 pt-1 lg:px-6">
+        <div className="flex flex-col gap-1">
           <DialogTitle className="font-display text-xl">New group or event</DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">A flat, a trip, a dinner. Split what you spend together.</DialogDescription>
         </div>

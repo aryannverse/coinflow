@@ -1,6 +1,6 @@
 import { setupClerkTestingToken } from '@clerk/testing/playwright'
 import { expect, test } from '@playwright/test'
-import { e2e2Email, hasE2E2User, signInOnboarded } from './helpers'
+import { e2e2Email, hasE2E2User, seedGroup, signInOnboarded } from './helpers'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -73,6 +73,12 @@ test('event → multi-payer subset expense → claim → balances → mark paid 
   await page2.getByRole('button', { name: 'Join group' }).click()
   await expect(page2.getByRole('alert').filter({ hasText: 'Pick which one is you' })).toBeVisible()
   await expect(page2).toHaveURL(new RegExp(`${invitePath}$`))
+  // "I’m not listed" under a name that is already here points back at that name, inline beside the field.
+  await page2.getByRole('radio', { name: 'I’m not listed' }).check()
+  await page2.getByLabel('Your name in this group').fill('ravi')
+  await page2.getByRole('button', { name: 'Join group' }).click()
+  await expect(page2.getByRole('alert').filter({ hasText: 'already a Ravi' })).toHaveText('There’s already a Ravi here — is that you? Pick the name above.')
+  await expect(page2.getByLabel('Your name in this group')).toHaveAttribute('aria-invalid', 'true')
   await page2.getByRole('radio', { name: 'Asha' }).check()
   await page2.getByRole('button', { name: 'Join group' }).click()
   // The URL first: the h1 regex alone also matches "Join <name>" on the page being left.
@@ -89,6 +95,18 @@ test('event → multi-payer subset expense → claim → balances → mark paid 
   const settle = page2.getByRole('dialog', { name: /^Pay / })
   await settle.getByRole('button', { name: 'I’ve paid' }).click()
   await expect(settle.getByText(/Waiting for .+ to confirm\./)).toBeVisible()
+  await settle.getByRole('button', { name: 'Done' }).click()
+  // Already marked: the row says so instead of offering "Settle up" again (pending marks don't change the payments).
+  await expect(page2.getByText(/^Marked ₹200 · waiting for /)).toBeVisible()
+  await expect(page2.getByRole('button', { name: /^Settle up ₹200 with / })).toHaveCount(0)
+  await expect(page2.getByRole('button', { name: /^Paid more\? Mark another payment to / })).toBeVisible()
+  // Ravi hasn't joined, so he can't confirm yet: the copy says he'll be asked when he does (plan A7).
+  await page2.getByRole('button', { name: 'Settle up ₹100 with Ravi' }).click()
+  const toRavi = page2.getByRole('dialog', { name: 'Pay Ravi' })
+  await toRavi.getByRole('button', { name: 'I’ve paid' }).click()
+  await expect(toRavi.getByText('Marked as paid. Ravi hasn’t joined Coinflow yet — they’ll be asked to confirm when they do.')).toBeVisible()
+  await toRavi.getByRole('button', { name: 'Done' }).click()
+  await expect(page2.getByText('Marked ₹100 · Ravi hasn’t joined Coinflow yet — they’ll be asked to confirm when they do.')).toBeVisible()
 
   // Back to the payee, who has moved to Expenses: the notification arrives live (SSE), or within the 30 s polling fallback.
   await page.getByRole('tab', { name: 'Expenses' }).click()
@@ -108,4 +126,15 @@ test('event → multi-payer subset expense → claim → balances → mark paid 
   await expect(page.getByText('Asha pays Ravi ₹100', { exact: true })).toBeVisible()
   await expect(page.getByText('Asha pays you ₹200', { exact: true })).toHaveCount(0)
   await ctx2.close()
+})
+
+test('recording cash from someone who hasn’t joined says it worked', async ({ page }) => {
+  await signInOnboarded(page)
+  const g = await seedGroup(page) // ₹900 dinner I paid, split with Asha and Ravi (placeholders): each pays me ₹300
+  await page.goto(`/groups/${g.id}?tab=balances`)
+  const row = page.getByRole('listitem').filter({ hasText: 'Asha pays you ₹300' })
+  await row.getByRole('button', { name: 'Record cash received' }).click()
+  await page.getByRole('dialog', { name: 'Record ₹300 from Asha?' }).getByRole('button', { name: 'Record' }).click()
+  await expect(page.getByText('Recorded ₹300 from Asha')).toBeVisible() // confirmed at once, no undo: so say so
+  await expect(page.getByText('Asha pays you ₹300', { exact: true })).toHaveCount(0)
 })
