@@ -92,7 +92,8 @@ export const groups = pgTable(
   'groups',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    createdBy: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    // Set null when the creator deletes their account and nobody else is left to take the group over (users.deleteUser).
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     name: text('name').notNull(),
     emoji: text('emoji').notNull().default('👥'),
     color: text('color').notNull().default('#C8F560'),
@@ -115,6 +116,8 @@ export const groupMembers = pgTable(
     upiId: text('upi_id'), // manual, placeholders only; claimed members use users.upi_id
     role: text('role', { enum: ['creator', 'member'] }).notNull().default('member'),
     addedBy: text('added_by').references(() => users.id, { onDelete: 'set null' }), // the "inviter" for the coach
+    // Who set a placeholder's UPI ID (only the creator or whoever added them may); the settle sheet names them.
+    upiSetBy: text('upi_set_by').references(() => users.id, { onDelete: 'set null' }),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     removedAt: timestamp('removed_at', { withTimezone: true }),
     ...timestamps,

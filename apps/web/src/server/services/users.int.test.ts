@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { makeUser, resetDb } from '@test/int/helpers'
+import { and, eq, isNull } from 'drizzle-orm'
+import { builtinCategory, makeUser, resetDb } from '@test/int/helpers'
 import { clerkState } from '@test/int/clerk-mock'
 
 vi.mock('@clerk/nextjs/server', async () => (await import('@test/int/clerk-mock')).clerkModule)
 
 import { requireCurrentUser } from '@/server/auth'
 import { getDb } from '@/server/db/client'
-import { groupMembers, groups } from '@/server/db/schema'
-import { createGroup } from './groups/groups'
+import { groupExpenses, groupMembers, groups, transactions } from '@/server/db/schema'
+import { createGroupExpense } from './groups/expenses'
+import { createGroup, getGroup } from './groups/groups'
+import { claimInvite, getInvite } from './groups/invites'
 import { deleteUser, getUser, updateMe, upsertUserFromProfile } from './users'
 
 describe('users service', () => {
@@ -131,5 +134,36 @@ describe('users service', () => {
     expect(left).toEqual([{ name: 'Flat' }]) // their own group goes; someone else's stays, with their row as a placeholder
     const members = await getDb().select({ userId: groupMembers.userId, name: groupMembers.displayName }).from(groupMembers)
     expect(members).toEqual(expect.arrayContaining([{ userId: null, name: 'A' }]))
+  })
+
+  it('deleteUser hands a group its creator made to the earliest-joined member, so their expenses and mirrors survive', async () => {
+    await makeUser('user_a', { name: 'Yash' })
+    await makeUser('user_b', { name: 'Asha B' })
+    await makeUser('user_c', { name: 'Ravi C' })
+    const food = (await builtinCategory('Food & Dining')).id
+    const { data: g } = await createGroup('user_a', { name: 'Goa', placeholders: [{ displayName: 'Asha' }, { displayName: 'Ravi' }] })
+    const id = (n: string) => g.members.find((m) => m.displayName === n)!.id
+    const token = (await getInvite('user_a', g.id)).url.split('/join/')[1]
+    await claimInvite('user_b', token, { memberId: id('Asha') }) // joins first, so she takes over
+    await claimInvite('user_c', token, { memberId: id('Ravi') })
+    await createGroupExpense('user_b', g.id, {
+      description: 'Dinner', amountPaise: 90_000, categoryId: food,
+      payers: [{ memberId: id('Asha'), paidPaise: 90_000 }], split: { mode: 'equal', memberIds: [g.myMemberId, id('Asha'), id('Ravi')] },
+    })
+
+    await deleteUser('user_a')
+
+    const [group] = await getDb().select().from(groups).where(eq(groups.id, g.id))
+    expect(group.createdBy).toBe('user_b')
+    const after = await getGroup('user_b', g.id)
+    expect(after.isCreator).toBe(true)
+    expect(after.members.map((m) => [m.displayName, m.role, m.claimed])).toEqual([
+      ['Yash', 'member', false], ['Asha', 'creator', true], ['Ravi', 'member', true], // Yash's history stays, as a placeholder
+    ])
+    expect(await getDb().select().from(groupExpenses).where(eq(groupExpenses.groupId, g.id))).toHaveLength(1)
+    const mirrors = (userId: string) => getDb().select().from(transactions)
+      .where(and(eq(transactions.userId, userId), eq(transactions.source, 'group'), isNull(transactions.deletedAt)))
+    expect((await mirrors('user_b')).map((m) => [m.amount, m.personalShare])).toEqual([[90_000, 30_000]])
+    expect((await mirrors('user_c')).map((m) => [m.amount, m.personalShare])).toEqual([[0, 30_000]])
   })
 })

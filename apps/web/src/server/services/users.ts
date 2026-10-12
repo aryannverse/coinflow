@@ -1,9 +1,9 @@
 import 'server-only'
-import { eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 import { mePatchSchema, type MePatch } from '@/lib/schemas/me'
 import { getDb } from '@/server/db/client'
 import { pgConstraint, pgErrorCode } from '@/server/db/errors'
-import { groups, users, type User } from '@/server/db/schema'
+import { groupMembers, groups, users, type User } from '@/server/db/schema'
 import { conflict, notFound } from '@/server/errors'
 
 export interface UserProfile {
@@ -46,13 +46,27 @@ export async function upsertUserFromProfile(p: UserProfile): Promise<User> {
 }
 
 /**
- * Deletes the user and everything that cascades from them. Their own groups go first, in the same transaction: in a
- * single `delete from users`, Postgres sets both group_members.user_id and .added_by to null on the creator's row while
- * the group is cascading away, and the second update fails the group_id foreign key.
+ * Deletes the user and everything that cascades from them. A group they created is not theirs alone: if anyone else
+ * with an account is still in it, the earliest of them to join becomes its creator; only a group nobody else holds
+ * goes with them. Their own member rows become placeholders (user_id set null), so the group's history still adds up.
+ * The hand-over runs first, in the same transaction, so the delete never cascades through someone else's records.
  */
 export async function deleteUser(id: string): Promise<void> {
   await getDb().transaction(async (tx) => {
-    await tx.delete(groups).where(eq(groups.createdBy, id))
+    const created = await tx.select({ id: groups.id }).from(groups).where(eq(groups.createdBy, id)).for('update')
+    for (const g of created) {
+      const [heir] = await tx.select().from(groupMembers)
+        .where(and(eq(groupMembers.groupId, g.id), isNotNull(groupMembers.userId), ne(groupMembers.userId, id), isNull(groupMembers.removedAt)))
+        .orderBy(asc(groupMembers.claimedAt), asc(groupMembers.createdAt), asc(groupMembers.id))
+        .limit(1)
+      if (!heir) {
+        await tx.delete(groups).where(eq(groups.id, g.id))
+        continue
+      }
+      await tx.update(groupMembers).set({ role: 'member' }).where(and(eq(groupMembers.groupId, g.id), eq(groupMembers.role, 'creator')))
+      await tx.update(groupMembers).set({ role: 'creator' }).where(eq(groupMembers.id, heir.id))
+      await tx.update(groups).set({ createdBy: heir.userId }).where(eq(groups.id, g.id))
+    }
     await tx.delete(users).where(eq(users.id, id))
   })
 }
