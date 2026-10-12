@@ -69,6 +69,27 @@
    - The checkpointer must work with Neon's direct URL (`sslmode=require`) and the `agent` schema (create it if missing, as today). Check: startup with `CHECKPOINTER=postgres` against the local DB still works.
 10. **Env example.** Add `STT_PROVIDER`, `TTS_PROVIDER`, `COACH_MODE` and `CRON_SECRET` to `apps/agent/.env.example`.
 
+### Groq fixes from the live check (2026-10-13)
+
+Evidence: `/private/tmp/claude-501/-Users-vermaryan1-Desktop-HCI-Project/d2493aeb-a4e0-4730-bf2c-ec68565af308/scratchpad/groq-check/report.md`. It contains the exact prototyped diffs and their measured results. Read it.
+
+12. **Receipts work on Groq** (`receipt.py` `read_receipt`).
+    - Groq's strict `json_schema` on `qwen/qwen3.8-27b` returned garbled values. Switch to `model.bind(response_format={"type": "json_object"})`.
+    - Spell out the exact JSON keys and types in the prompt; it must contain the word "json".
+    - Strip any code fences, then call `RawReceipt.model_validate_json`. Any validation failure becomes the existing friendly error.
+    - Make the method a setting, `RECEIPT_JSON_MODE=json_object|json_schema`, defaulting to `json_object`.
+    - Keep the honesty rules (mismatch and the confidence cap).
+    - Extend the fake LLM in tests to support `.bind(...).ainvoke`. Add tests for code-fenced and invalid JSON.
+13. **Planner engine** (`planner.py` `build_planner`).
+    - Add `PLANNER_ENGINE=deep|light`. `deep` is the current `create_deep_agent`, kept as the spec's Deep Agents planner.
+    - `light` builds the planner with `langchain.agents.create_agent(model, [list_categories, propose_group_event, propose_budget, finish_plan], system_prompt=PLANNER_PROMPT, context_schema=AgentContext)`, as in the report.
+    - The default is `light`, because Deep Agents adds about 1.8k tokens per call and exceeds Groq's free-tier limit of 8,000 tokens per minute.
+    - Keep the "inner drafts never leak" guarantee and its test for both engines (adjust `tests/test_planner.py` fakes).
+    - Note the engine choice in spec §4.3 as a deployment setting, not a removal.
+14. **Rate limits** (`llm.py`). Raise `max_retries` from 1 to 3 so Groq 429s (retry-after 0.4–2.7 s) are absorbed. The total stays within the 60 s turn budget.
+15. **Prompt hygiene.** The 20b run leaked third person ("Drafted for the user…"). Add one line to the system prompt telling the agent to speak directly to the user in second person and never narrate its tools.
+16. **Env examples.** Add `RECEIPT_JSON_MODE` and `PLANNER_ENGINE` to `apps/agent/.env.example`. `LLM_MODEL` stays whatever the user chooses; the controller sets it.
+
 ### Docs
 
 11. Add `docs/deploy/vercel.md`, the deployment runbook, written for the owner (a student who hasn't used Vercel or Neon before). It covers:
