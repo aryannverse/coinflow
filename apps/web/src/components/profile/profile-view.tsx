@@ -20,6 +20,7 @@ import type { MotionPref } from '@/lib/motion-pref'
 import { buildMePatch, profileValues, type ProfileErrors, type ProfileField } from '@/lib/profile-patch'
 import type { MePatch } from '@/lib/schemas/me'
 import { cn } from '@/lib/utils'
+import { GroupPrefs } from './group-prefs'
 import { UpiQrUpload } from './upi-qr-upload'
 
 type Scope = 'you' | 'upi' | 'look'
@@ -434,6 +435,24 @@ export function ProfileView({ initial }: { initial?: MeDTO }) {
             <UpiIdField me={me} commit={commit} pending={busy.upi} onDirty={clear} note={noteFor('upi')} />
             <UpiQrUpload />
           </div>
+        </Tile>
+
+        <Tile spotlight={false} aria-labelledby="p-groups">
+          <h2 id="p-groups" className="font-display text-xl font-bold">Groups & coach</h2>
+          <div className="mt-2"><GroupPrefs initial={me} /></div>
+          <Link
+            href="/friends"
+            className={cn(
+              'mt-3 flex min-h-12 items-center justify-between gap-3 rounded-chip border px-4 py-2 outline-none',
+              'hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring active:scale-[0.97]',
+            )}
+          >
+            <span className="flex flex-col">
+              <span className="font-medium">Friends</span>
+              <span className="text-sm text-muted-foreground">Find people by email and manage requests</span>
+            </span>
+            <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+          </Link>
         </Tile>
 
         <Tile spotlight={false} aria-labelledby="p-prefs">

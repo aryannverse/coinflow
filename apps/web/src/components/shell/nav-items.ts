@@ -1,8 +1,9 @@
-import { Activity, CalendarClock, Home, PieChart, UserRound, type LucideIcon } from 'lucide-react'
+import { Activity, CalendarClock, Home, PieChart, UserRound, UsersRound, type LucideIcon } from 'lucide-react'
 
 export const NAV_ITEMS: { href: string; label: string; icon: LucideIcon; mobile: boolean }[] = [
   { href: '/home', label: 'Home', icon: Home, mobile: true },
   { href: '/activity', label: 'Activity', icon: Activity, mobile: true },
+  { href: '/groups', label: 'Groups', icon: UsersRound, mobile: true },
   { href: '/insights', label: 'Insights', icon: PieChart, mobile: true },
   { href: '/recurring', label: 'Recurring', icon: CalendarClock, mobile: false },
   { href: '/profile', label: 'Profile', icon: UserRound, mobile: true },

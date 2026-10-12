@@ -8,7 +8,7 @@ export function BottomTabs() {
   const path = usePathname()
   return (
     <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/90 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-      <ul className="mx-auto grid max-w-md grid-cols-4">
+      <ul className="mx-auto grid max-w-md grid-cols-5">
         {NAV_ITEMS.filter((i) => i.mobile).map(({ href, label, icon: Icon }) => {
           const active = isActivePath(path, href)
           return (

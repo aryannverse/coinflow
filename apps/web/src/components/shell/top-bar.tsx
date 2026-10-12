@@ -3,6 +3,7 @@ import { UserButton } from '@clerk/nextjs'
 import { Plus } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { ThemeToggle } from '@/components/fx/theme-toggle'
+import { NotificationBell } from '@/components/notifications/notification-bell'
 import { useQuickAdd } from '@/components/quick-add/quick-add-provider'
 import { Button } from '@/components/ui/button'
 import { useUpdateMe } from '@/hooks/queries'
@@ -18,6 +19,7 @@ export function TopBar() {
       <span className="font-display text-lg font-bold lg:hidden">coinflow</span>
       <span className="sr-only lg:not-sr-only lg:font-display lg:text-lg">{title}</span>
       <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
         <ThemeToggle onPersist={(theme) => updateMe.mutate({ theme })} />
         <Button
           onClick={() => quick.open()}

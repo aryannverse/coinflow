@@ -1,6 +1,7 @@
 'use client'
 import { Trash2 } from 'lucide-react'
 import { motion, useAnimation } from 'motion/react'
+import { useRouter } from 'next/navigation'
 import { useRef } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useQuickAdd } from '@/components/quick-add/quick-add-provider'
@@ -23,21 +24,27 @@ export function TransactionRow({ t, onDelete }: { t: TransactionDTO; onDelete: (
   const dragged = useRef(false)
 
   const name = t.note ?? t.category.name
-  const amount = formatINR(t.amount)
+  // Mirrors (spec §2.2) open their group and are never edited or deleted here.
+  const mirror = t.group // set for source 'group' | 'settlement'
+  const router = useRouter()
+  // A group expense counts your share as spending; the cash you paid is shown beside it.
+  const shown = t.source === 'group' ? t.personalShare : t.amount
+  const amount = formatINR(shown)
   const edit = () => {
     if (dragged.current) return // the click that ends a drag is not a tap
+    if (mirror) return router.push(`/groups/${mirror.id}${t.groupExpenseId ? `?tab=expenses#expense-${t.groupExpenseId}` : '?tab=balances'}`)
     quick.open({ editId: t.id, type: t.type, amount: t.amount, categoryId: t.categoryId, note: t.note, method: t.method, occurredAt: t.occurredAt })
   }
 
   return (
     <li data-row-id={t.id} className="group relative overflow-hidden rounded-chip">
-      {swipe && (
+      {swipe && !mirror && (
         <div className="absolute inset-y-0 right-0 flex items-center bg-surface-2 px-4" aria-hidden>
           <Trash2 className="size-5 text-muted-foreground" />
         </div>
       )}
       <motion.div
-        drag={swipe ? 'x' : false}
+        drag={swipe && !mirror ? 'x' : false}
         dragDirectionLock
         dragConstraints={{ left: -96, right: 0 }}
         dragElastic={0.1}
@@ -58,16 +65,20 @@ export function TransactionRow({ t, onDelete }: { t: TransactionDTO; onDelete: (
           className={`flex min-h-14 min-w-12 flex-1 items-center gap-3 rounded-chip text-left active:scale-[0.99] ${RING}`}
         >
           {/* The name comes from the visible text, so it always contains it (WCAG 2.5.3): "Edit Swiggy biryani Food · 6:00 pm · UPI −₹389". */}
-          <span className="sr-only">Edit </span>
+          <span className="sr-only">{mirror ? 'Open group: ' : 'Edit '}</span>
           <span className="grid size-10 shrink-0 place-items-center rounded-chip bg-surface-2" aria-hidden="true">{t.category.emoji}</span>
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-sm">{name}</span>
-            <span className="truncate text-xs text-muted-foreground">{t.category.name} · {timeLabel(t.occurredAt)} · {methodLabel(t.method)}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {mirror && <span className="mr-1 rounded-full border px-1.5 text-[11px]">{mirror.emoji} {mirror.name}</span>}
+              {t.category.name} · {timeLabel(t.occurredAt)}
+              {mirror ? (t.source === 'group' && t.amount !== t.personalShare ? ` · paid ${formatINR(t.amount)}` : '') : ` · ${methodLabel(t.method)}`}
+            </span>
           </span>
           <span className={`amount shrink-0 ${t.type === 'income' ? 'text-primary' : ''}`}>{t.type === 'expense' ? '−' : '+'}{amount}</span>
         </button>
         {/* Always visible on touch (the non-drag way to delete, WCAG 2.5.7); on desktop it appears on hover or focus. */}
-        <div className="shrink-0 lg:opacity-0 lg:transition-opacity lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
+        {!mirror && <div className="shrink-0 lg:opacity-0 lg:transition-opacity lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
           <button
             type="button"
             onClick={() => onDelete(t)}
@@ -76,7 +87,7 @@ export function TransactionRow({ t, onDelete }: { t: TransactionDTO; onDelete: (
           >
             <Trash2 className="size-4" aria-hidden />
           </button>
-        </div>
+        </div>}
       </motion.div>
     </li>
   )

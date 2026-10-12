@@ -14,7 +14,7 @@ import type { RecurringCreate, RecurringPatch } from '@/lib/schemas/recurring'
 import { undoStore } from '@/lib/undo-store'
 
 export type TxnFilters = { type?: string; categoryId?: string; method?: string; from?: string; to?: string; q?: string }
-export type TxnInput = { type: 'expense' | 'income'; amount: number; categoryId: string; note?: string | null; method?: string; occurredAt?: string }
+export type TxnInput = { type: 'expense' | 'income'; amount: number; categoryId: string; note?: string | null; method?: string; occurredAt?: string; source?: 'manual' | 'chat' | 'voice' | 'scan' }
 export type TxnPage = { data: TransactionDTO[]; nextCursor: string | null }
 
 export const qk = {
@@ -55,7 +55,7 @@ async function snapshotTransactions(qc: QueryClient): Promise<Snapshot> {
   return qc.getQueriesData({ queryKey: TXN_ROOT })
 }
 
-function useLedgerMutation<TVars, TRes extends Mutation>(
+export function useLedgerMutation<TVars, TRes extends Mutation>(
   fn: (v: TVars) => Promise<TRes>,
   label: (v: TVars, r: TRes) => string,
   extraKeys: QueryKey[] = [],
@@ -211,7 +211,8 @@ export const useUndo = () => {
   return useMutation({
     mutationFn: (auditId: string) => api<{ data: unknown }>(`/undo/${auditId}`, { method: 'POST' }),
     onSuccess: () => {
-      for (const key of [...LEDGER_KEYS, qk.recurring]) void qc.invalidateQueries({ queryKey: key })
+      // Undoing a group expense or a settlement mark moves balances and notifications too.
+      for (const key of [...LEDGER_KEYS, qk.recurring, ['groups'], ['notifications']] as QueryKey[]) void qc.invalidateQueries({ queryKey: key })
       toast.success('Undone')
     },
     onError: (err) => {

@@ -1,5 +1,5 @@
 'use client'
-import { Moon, Plus, Search } from 'lucide-react'
+import { Moon, Plus, Search, UserPlus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useState } from 'react'
@@ -59,6 +59,9 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               <Icon aria-hidden /> {label}
             </CommandItem>
           ))}
+          <CommandItem value="go Friends" onSelect={() => run(() => router.push('/friends'))} className="min-h-12">
+            <UserPlus aria-hidden /> Friends
+          </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Preferences">
           <CommandItem value="toggle theme" onSelect={() => run(() => {
