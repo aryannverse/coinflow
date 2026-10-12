@@ -289,6 +289,9 @@ LLM configuration:
   - `propose_group_event` (name, dates, members-as-placeholders);
   - `propose_settle_reminder`.
 - **Planning.** The trip/event planner is a **Deep Agents** sub-agent invoked for multi-step requests ("plan a Goa trip for 5 on ₹40k"). It returns a bundle: an event proposal plus suggested budgets per category plus a checklist.
+  - *Engine (a deployment setting, added 2026-10-13).* `PLANNER_ENGINE=deep|light` picks how the planner runs. The tools, prompt and bundle stay the same either way.
+    - `deep` is the Deep Agents sub-agent described above, and stays available.
+    - `light` is the default. It runs the same tools in a plain LangChain agent. The Deep Agents scaffolding adds about 1.8k tokens to every planner call, and in the live check a 6–8-call plan went over Groq's free-tier limit of 8,000 tokens a minute.
 - **Clarification.** When required fields are ambiguous, the agent asks a follow-up question instead of guessing.
 - **Context.** The client sends `{route, groupId?}` with each message, so on a group page the participants default to that group's members.
 
@@ -304,7 +307,12 @@ LLM configuration:
 ### 4.5 Speech & receipts
 - **STT.** `POST /stt` accepts webm/opus or wav up to 30 s and returns text. It uses faster-whisper (`small` int8 on CPU; configurable). Audio stays in memory only and is discarded afterwards. Target: ≤ 2.5 s for < 15 s clips on the dev machine.
 - **TTS.** `POST /tts` takes text and returns audio, using Kokoro (82M). It is optional and runs only when the user turns on "read replies aloud".
-- **Receipts.** `POST /receipt` accepts an image up to 5 MB and returns `{merchant?, date?, items[], taxPaise, tipPaise, discountPaise, totalPaise, confidence}`. It uses the vision model with a strict JSON schema.
+- **Receipts.** `POST /receipt` accepts an image up to 5 MB and returns `{merchant?, date?, items[], taxPaise, tipPaise, discountPaise, totalPaise, confidence}`. It uses the vision model with JSON output; `RECEIPT_JSON_MODE` picks the method.
+  - **Methods:**
+    - `json_object` is the default: the prompt spells out the JSON shape, and the agent validates the reply.
+    - `json_schema` uses a strict schema.
+    - The default changed on 2026-10-13: in the live check, Groq's strict decoding on qwen3.8 garbled the values.
+  - **Size on Vercel:** the cap is 4 MB (§10).
   - **Mismatch:** if the item sum ± adjustments ≠ total, it returns a mismatch flag for the user to resolve.
   - **Destination:** the result fills the itemized canvas, or quick add for a single total.
   - **Retention:** images are not stored.
