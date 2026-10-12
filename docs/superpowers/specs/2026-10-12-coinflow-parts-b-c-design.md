@@ -402,3 +402,55 @@ LLM configuration:
 3. **C service:** `apps/agent` with the LLM config, auth bridge, read and proposal tools, the LangGraph agent and Deep Agents planner, STT, TTS, receipt, the coach, pytest and docker-compose.
 4. **C frontend:** the Next `/api/v1/agent/*` proxy plus the internal-token path in auth; the agent panel; proposal chips with approve, edit and dismiss; voice; camera; TTS; context scoping; and the coach notifications.
 5. **Verification and docs:** the E2E suites for B and C, axe and reflow, the HCI doc update, and a full `pnpm verify`.
+
+## 10. Deployment on Vercel (added 2026-10-12)
+
+The user asked to deploy with a working backend, frontend and AI features. Decisions:
+- **Speech:** Groq-hosted.
+- **Sign-in:** Clerk development keys on `*.vercel.app`.
+- **Plan:** Vercel Hobby (free).
+
+**Shape.** Two Vercel projects from `aryannverse/coinflow`. Both run functions in `bom1` (Mumbai) to sit next to the database.
+- `coinflow-web`: root `apps/web`, Next.js.
+- `coinflow-agent`: root `apps/agent`, a FastAPI app on the Vercel Python runtime with no torch.
+
+**Database: Neon Postgres** via the Vercel Marketplace, region `aws-ap-south-1`.
+- The app uses the pooled URL (`DATABASE_URL`).
+- These use the direct URL (`DATABASE_URL_UNPOOLED`), because `LISTEN` doesn't work through Neon's pooler:
+  - the notification bus;
+  - migrations, run with `pnpm db:migrate`;
+  - the agent's LangGraph checkpointer (schema `agent`).
+- postgres.js is sized for serverless: a small pool and an idle timeout.
+
+**Notifications (SSE).** Hobby caps a function at 300 s.
+- The stream route sets `maxDuration = 300` and closes itself cleanly at about 280 s, sending a `retry` hint.
+- `EventSource` reconnects and resumes from `Last-Event-ID`.
+- The 30 s polling fallback is unchanged.
+
+**File storage.** A `vercel-blob` driver sits behind the existing `Storage` interface, selected by `STORAGE_DRIVER` (`local` | `vercel-blob`) and authenticated with `BLOB_READ_WRITE_TOKEN`.
+- Objects are private, or failing that unguessable and never exposed.
+- Reads still go only through the members-only `/api/v1/files` route.
+- Local disk remains the default for development.
+
+**Upload sizes.** Vercel rejects request bodies over 4.5 MB.
+- The browser downscales receipt photos before upload: longest side ≤ 2,000 px, JPEG.
+- Receipt and audio caps drop to **4 MB** on both the web proxy and the agent.
+
+**Speech.** Provider settings choose `groq` (production) or `local` (development; faster-whisper and Kokoro stay optional extras).
+- `STT_PROVIDER` with Groq `whisper-large-v3-turbo` via `/audio/transcriptions`, accepting webm and wav.
+- `TTS_PROVIDER` with Groq `canopylabs/orpheus-v1-english` via `/audio/speech`, returning wav.
+- `/health` reports `stt` and `tts` from the configured provider.
+- The ≤ 30 s clip limit, in-memory handling and never storing audio still apply.
+
+**Coach.** `COACH_MODE` is `scheduler` (local APScheduler, as today) or `cron`.
+- In `cron` mode a Vercel Cron on the agent project calls `POST /coach/run` at `0 3 * * *` (03:00 UTC = 08:30 IST).
+- Hobby crons run once a day, and the timing may drift within the hour.
+- The endpoint requires `Authorization: Bearer $CRON_SECRET`.
+- It runs each user once. A user whose quiet hours cover 08:30 IST is skipped that day; this is a documented deviation from the hourly slots in plan A9.
+- The ≤ 2 per day cap and dedupe stay enforced server-side.
+
+**Auth.** Clerk development instance keys on the `vercel.app` URL (a "development mode" badge shows). The Clerk webhook points at `https://<web>.vercel.app/api/webhooks/clerk`.
+- The agent's endpoints are public URLs. They are protected by `AGENT_SHARED_SECRET` HMAC tokens; `/health` stays unauthenticated and reveals capabilities only.
+- `APP_URL` and `AGENT_URL` and the agent's `COINFLOW_API_URL` point at the deployed URLs.
+
+**Out of scope:** a custom domain, Clerk production keys, the Pro plan, CI pipelines and preview-branch databases.
