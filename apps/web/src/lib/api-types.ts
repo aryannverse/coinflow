@@ -41,3 +41,9 @@ export type FriendSearchDTO = (FriendUserDTO & { relation: FriendRelation; reque
 export type FriendRequestDTO = FriendUserDTO & { requestId: string; createdAt: string }
 export type FriendDTO = FriendUserDTO & { since: string }
 export type FriendsDTO = { friends: FriendDTO[]; incoming: FriendRequestDTO[]; outgoing: FriendRequestDTO[] }
+
+/** Spec §4.5: what the agent read off a receipt photo (the photo itself is never stored). */
+export type ReceiptDTO = {
+  merchant: string | null; date: string | null; items: { name: string; amountPaise: number }[]
+  taxPaise: number; tipPaise: number; discountPaise: number; totalPaise: number; confidence: number; mismatch: boolean; mismatchPaise: number
+}

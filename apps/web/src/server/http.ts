@@ -35,7 +35,7 @@ export function route<P extends Record<string, string | string[]> = Record<strin
   return async (req: Request, segment?: { params: Promise<P> }): Promise<Response> => {
     const requestId = crypto.randomUUID().slice(0, 8)
     try {
-      const user = await requireCurrentUser()
+      const user = await requireCurrentUser(req)
       const params = (segment ? await segment.params : {}) as P
       const result = await fn({ req, user, params, requestId })
       if (result instanceof Response) {

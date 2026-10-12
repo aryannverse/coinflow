@@ -2,7 +2,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import type { QuickCommand } from '@/lib/quick-command'
 
-export type QuickAddPrefill = Partial<QuickCommand> & { editId?: string; occurredAt?: string; method?: string }
+export type QuickAddPrefill = Partial<QuickCommand> & { editId?: string; occurredAt?: string; method?: string; source?: 'chat' | 'voice' | 'scan' }
 /** `openCount` increments on every open(), so the sheet can remount its form (fresh state) per opening. */
 type State = { open: boolean; prefill: QuickAddPrefill; openCount: number }
 

@@ -4,6 +4,7 @@
  * query and require every whitespace-separated token to appear in the item's value or keywords.
  */
 export function paletteFilter(value: string, search: string, keywords: string[] = []): number {
+  if (value === 'ask' || value.startsWith('ask ')) return 1 // the "Ask Coinflow" row carries whatever was typed, so it never filters out
   const tokens = search.toLowerCase().split(/\s+/).filter(Boolean)
   if (tokens.length === 0) return 1
   const haystack = `${value} ${keywords.join(' ')}`.toLowerCase()

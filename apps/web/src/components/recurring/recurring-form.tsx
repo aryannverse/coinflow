@@ -50,7 +50,7 @@ export function RecurringForm({ initial, onDone, kindDefault = 'bill', prefill, 
   initial?: RecurringDTO
   onDone: () => void
   kindDefault?: Kind
-  prefill?: { name: string; category: string; amount: number }
+  prefill?: { name: string; category: string; amount: number; cadence?: Cadence; nextDueOn?: string; categoryId?: string }
   /** Lets a host (onboarding) move focus to, and describe, the submit button. */
   submitId?: string
   submitDescribedBy?: string
@@ -59,9 +59,9 @@ export function RecurringForm({ initial, onDone, kindDefault = 'bill', prefill, 
   const [kind, setKind] = useState<Kind>(startKind)
   const [name, setName] = useState(initial?.name ?? prefill?.name ?? '')
   const [amount, setAmount] = useState(initial ? paiseToRupeeString(initial.amount) : prefill ? paiseToRupeeString(prefill.amount) : '')
-  const [cadence, setCadence] = useState<Cadence>(initial?.cadence ?? 'monthly')
-  const [nextDueOn, setNextDueOn] = useState(() => initial?.nextDueOn ?? addDays(toISTDate(new Date()), 1))
-  const [categoryId, setCategoryId] = useState<string | undefined>(initial?.categoryId)
+  const [cadence, setCadence] = useState<Cadence>(initial?.cadence ?? prefill?.cadence ?? 'monthly')
+  const [nextDueOn, setNextDueOn] = useState(() => initial?.nextDueOn ?? prefill?.nextDueOn ?? addDays(toISTDate(new Date()), 1))
+  const [categoryId, setCategoryId] = useState<string | undefined>(initial?.categoryId ?? prefill?.categoryId)
   const [fieldError, setFieldError] = useState<FieldError | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
 

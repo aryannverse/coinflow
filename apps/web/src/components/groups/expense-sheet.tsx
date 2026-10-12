@@ -1,5 +1,7 @@
 'use client'
+import { Camera } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
+import { useAgentHealth } from '@/components/agent/use-agent-health'
 import { AmountRoll } from '@/components/fx/amount-roll'
 import { Spark } from '@/components/fx/spark'
 import { CategoryChips } from '@/components/quick-add/category-chips'
@@ -11,10 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useCategories } from '@/hooks/queries'
 import { useCreateGroupExpense, useGroup, useGroupExpense, useUpdateGroupExpense } from '@/hooks/group-queries'
-import { ApiError } from '@/lib/api-client'
-import type { GroupDetailDTO, GroupExpenseDTO } from '@/lib/api-types'
+import { api, ApiError } from '@/lib/api-client'
+import type { GroupDetailDTO, GroupExpenseDTO, ReceiptDTO } from '@/lib/api-types'
 import { buildBody, draftFromExpense, emptyDraft, previewDraft, type ExpenseDraft } from '@/lib/expense-form'
 import { parseRupeesToPaise } from '@/lib/money'
+import { receiptNotice, receiptToDraft } from '@/lib/proposal-apply'
 import type { SplitMode } from '@/lib/split'
 import { cn } from '@/lib/utils'
 import { FIELD } from './field'
@@ -38,6 +41,8 @@ const FOCUS: [string, string[]][] = [
   ['split', ['#ge-split [aria-invalid="true"]', '#ge-split [data-invalid]', '#ge-split']],
 ]
 type FieldError = { field: string; message: string }
+type Scan = { reading: boolean; error: string | null; notice: string | null }
+const RECEIPT_MAX_BYTES = 5 * 1024 * 1024 // spec §4.5
 
 function ExpenseForm({ group, expense, prefill, notice, onDone }: {
   group: GroupDetailDTO; expense?: GroupExpenseDTO; prefill?: Partial<ExpenseDraft>; notice?: string; onDone: () => void
@@ -59,6 +64,23 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
   const pending = create.isPending || update.isPending
   const preview = useMemo(() => previewDraft(draft, order), [draft, order])
   const amountPaise = parseRupeesToPaise(draft.amount.trim() || '0') ?? 0
+  // Spec §3.5/§4.5: "Scan receipt" fills the itemized canvas. Shown only when the assistant can read images.
+  const vision = useAgentHealth().data?.capabilities?.vision === true
+  const [scan, setScan] = useState<Scan>({ reading: false, error: null, notice: null })
+  const fileRef = useRef<HTMLInputElement>(null)
+  async function scanReceipt(file: File) {
+    if (file.size > RECEIPT_MAX_BYTES) return setScan({ reading: false, error: 'That photo is over 5 MB. Try a closer, smaller shot.', notice: null })
+    setScan({ reading: true, error: null, notice: null })
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      const { data } = await api<{ data: ReceiptDTO }>('/agent/receipt', { method: 'POST', body: form })
+      patch(receiptToDraft(data))
+      setScan({ reading: false, error: null, notice: receiptNotice(data) ?? null })
+    } catch (err) {
+      setScan({ reading: false, error: err instanceof ApiError ? err.message : 'Couldn’t read that receipt. Try a sharper photo.', notice: null })
+    }
+  }
   const errorFor = (prefix: string) => (fieldError && fieldError.field.startsWith(prefix) ? fieldError.message : null)
 
   const patch = (p: Partial<ExpenseDraft>) => {
@@ -104,12 +126,31 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
           <DialogDescription className="text-sm text-muted-foreground">{group.emoji} {group.name}</DialogDescription>
         </div>
         {notice && <p role="status" className="rounded-chip border bg-surface-2 p-3 text-sm">{notice}</p>}
+        {scan.notice && <p role="status" className="rounded-chip border bg-surface-2 p-3 text-sm">{scan.notice}</p>}
 
         <div>
           <div aria-hidden className={cn('flex min-h-12 items-center overflow-hidden', amountPaise ? 'text-foreground' : 'text-muted-foreground')}>
             <AmountRoll paise={amountPaise} fontSize={40} />
           </div>
-          <Label htmlFor="ge-amount" className="mt-1 text-muted-foreground">Amount</Label>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <Label htmlFor="ge-amount" className="text-muted-foreground">Amount</Label>
+            {vision && (
+              <>
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" capture="environment" tabIndex={-1} aria-hidden className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ''
+                    if (f) void scanReceipt(f)
+                  }} />
+                <Button type="button" variant="outline" aria-label="Scan receipt" aria-disabled={scan.reading || undefined}
+                  aria-describedby={scan.error ? 'ge-scan-error' : undefined}
+                  onClick={() => { if (!scan.reading) fileRef.current?.click() }}
+                  className="min-h-12 rounded-chip active:scale-[0.97]">
+                  <Camera className="size-4" aria-hidden /> Scan receipt
+                </Button>
+              </>
+            )}
+          </div>
           <div className="mt-1 flex items-center gap-2 rounded-chip border bg-surface-2 px-3 focus-within:border-primary focus-within:ring-3 focus-within:ring-ring has-aria-invalid:border-neutral-negative">
             <span aria-hidden className="amount text-xl text-muted-foreground">₹</span>
             <input id="ge-amount" inputMode="decimal" autoComplete="off" placeholder="0" value={draft.amount}
@@ -118,6 +159,9 @@ function ExpenseForm({ group, expense, prefill, notice, onDone }: {
               className="amount min-h-12 w-full bg-transparent text-xl outline-none placeholder:text-muted-foreground/50" />
           </div>
           {errorFor('amountPaise') && <p id="ge-amount-error" role="alert" className="mt-1.5 text-sm text-neutral-negative">{errorFor('amountPaise')}</p>}
+          {/* Always mounted while scanning is offered, so the live region exists before its text changes. */}
+          {vision && <p role="status" className="mt-1.5 text-sm text-muted-foreground empty:mt-0">{scan.reading ? 'Reading the receipt…' : ''}</p>}
+          {scan.error && <p id="ge-scan-error" role="alert" className="mt-1.5 text-sm text-neutral-negative">{scan.error}</p>}
         </div>
 
         <div>

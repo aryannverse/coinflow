@@ -19,4 +19,8 @@ describe('paletteFilter', () => {
   it('matches keywords too', () => {
     expect(paletteFilter('toggle theme', 'dark', ['dark', 'light'])).toBe(1)
   })
+  it('the Ask item always shows', () => {
+    expect(paletteFilter('ask plan a goa trip', 'zzz unrelated')).toBe(1)
+    expect(paletteFilter('ask ', '250 lunch')).toBe(1)
+  })
 })

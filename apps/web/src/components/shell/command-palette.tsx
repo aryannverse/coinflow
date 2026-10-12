@@ -1,8 +1,9 @@
 'use client'
-import { Moon, Plus, Search, UserPlus } from 'lucide-react'
+import { Moon, Plus, Search, Sparkles, UserPlus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useState } from 'react'
+import { useAgent } from '@/components/agent/agent-provider'
 import { useQuickAdd } from '@/components/quick-add/quick-add-provider'
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useCategories, useUpdateMe } from '@/hooks/queries'
@@ -15,6 +16,8 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   const [text, setText] = useState('')
   const router = useRouter()
   const quick = useQuickAdd()
+  const agent = useAgent()
+  const online = agent.health?.online === true // spec §4.7: the palette's "Ask Coinflow…" row exists only while the assistant can answer
   const { setTheme, resolvedTheme } = useTheme()
   const updateMe = useUpdateMe()
   const { data: categories = [] } = useCategories()
@@ -31,11 +34,19 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={handleOpenChange} title="Ask Coinflow" description="Add an expense, jump to a page, or search">
+    <CommandDialog open={open} onOpenChange={handleOpenChange} title="Quick commands" description="Add an expense, jump to a page, or search">
       <Command filter={paletteFilter}>
       <CommandInput placeholder="“250 food lunch”, “+5000 salary”, or search…" value={text} onValueChange={setText} />
       <CommandList>
         <CommandEmpty>Try starting with an amount, like “120 chai”.</CommandEmpty>
+        {online && (
+          <CommandGroup heading="Ask">
+            <CommandItem value={`ask ${text.trim()}`} onSelect={() => run(() => agent.open(text.trim() || undefined))} className="min-h-12">
+              <Sparkles className="text-primary" aria-hidden />
+              {text.trim() ? `Ask Coinflow: “${text.trim()}”` : 'Ask Coinflow…'}
+            </CommandItem>
+          </CommandGroup>
+        )}
         {parsed && (
           <CommandGroup heading="Quick add">
             <CommandItem value={`add ${text.trim()}`} onSelect={() => run(() => quick.open(parsed))} className="min-h-12">

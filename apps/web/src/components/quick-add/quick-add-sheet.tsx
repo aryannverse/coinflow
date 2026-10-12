@@ -122,7 +122,11 @@ function QuickAddForm({ prefill, desktop, onDone }: { prefill: QuickAddPrefill; 
         const patch = buildPatch(initial, { type, amount: paise, categoryId: cat, note: cleanNote, method }, whenTouched, when)
         if (Object.keys(patch).length > 0) await update.mutateAsync({ id: editId, patch })
       } else {
-        await create.mutateAsync({ type, amount: paise, categoryId: cat, note: cleanNote, method, ...(whenTouched ? { occurredAt: new Date(when).toISOString() } : {}) })
+        await create.mutateAsync({
+          type, amount: paise, categoryId: cat, note: cleanNote, method,
+          ...(prefill.source ? { source: prefill.source } : {}), // spec §4.4: an edited AI proposal keeps its origin
+          ...(whenTouched || prefill.occurredAt ? { occurredAt: new Date(when).toISOString() } : {}),
+        })
       }
       try { localStorage.setItem(LAST_METHOD_KEY, method) } catch { /* private mode: the default is only a convenience */ }
       onDone()
