@@ -2,6 +2,8 @@
 
 Part A of Coinflow is the personal-finance foundation. This document explains why each interaction is designed as it is, with evidence for each claim.
 
+Parts B (groups & events) and C (the AI layer) are covered in [part-b-c-rationale.md](part-b-c-rationale.md).
+
 **Evidence conventions**
 
 - **Screenshots** are in [`screens/`](screens/), captured 2026-10-12 from a production build with `reducedMotion: 'reduce'`. Each screen has a `-1440` capture (1440×900, dark) and a `-390` capture (390×844, light). Landing, Home, Quick add, Undo toast, both Insights screens and Profile were recaptured after the final review fixes; the rest are unchanged.

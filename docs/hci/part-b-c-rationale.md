@@ -1,0 +1,202 @@
+# Coinflow Parts B & C: interaction rationale
+
+Part B adds groups and events (shared expenses, balances, settling up, friends). Part C adds an AI layer (chat, voice, receipts and a coach) that only ever *proposes*. This document explains why each new interaction is designed as it is, with evidence for each claim. It follows the conventions of [part-a-rationale.md](part-a-rationale.md).
+
+**Evidence conventions**
+
+- **Screenshots** are in [`screens/`](screens/), captured 2026-10-12 by `e2e/capture-bc.spec.ts` (tagged `@capture`, run with `CAPTURE=1`) from a production build (`pnpm build && pnpm start`) with `reducedMotion: 'reduce'`. As in Part A, each screen has a `-1440` capture (1440×900, dark) and a `-390` capture (390×844 at 2×, light).
+- **Accounts.** Only the two E2E accounts appear: "Coinflow E2E" (the first E2E user, here the payee) and the second E2E user, who claims "Asha". The demo account was not touched. Asha, Ravi and Dev start as placeholders. The friends screen uses two fixture rows ("Asha Fixture", "Ravi Fixture") that are not Clerk users and are deleted on every E2E run.
+- **The agent is stubbed in every E2E and capture run.** No LLM is configured locally, so the real assistant reports "Assistant offline". `e2e/agent.spec.ts` and the capture spec replace only the agent routes (`/api/v1/agent/health`, `/chat`, `/outcome`) with scripted responses. Approving a proposal still goes through the real API. The real LLM is not part of the graded run. The agent's own behaviour is covered by pytest with a scripted fake LLM (`apps/agent/tests/`). In the B screens the pill reads "Ask Coinflow…" because health is stubbed online; `c-offline` shows the real local state.
+- **Tests** are cited as `e2e/<file>.spec.ts › <title>` (Playwright, `apps/web/e2e/`), by path under `apps/web/src/` for unit and integration tests, and as `apps/agent/tests/<file>.py::<test>` for pytest. Code is cited by path under `apps/web/src/` or `apps/agent/src/coinflow_agent/`.
+- **Test run behind this document:** a full `pnpm verify` at commit `b97ebf8` (2026-10-12): it passed lint and typecheck; **358 unit** tests (Vitest); **97 agent** tests (pytest); **167 integration** tests; the production build; **77 E2E passed** with 10 skipped (the 8 phone-only reflow checks in the desktop project, plus the two-person groups and friends journeys in the mobile project, which run once, on desktop); and the landing Lighthouse gate (desktop 92 / mobile 82 performance, 100 / 100 accessibility). The screenshots and the `docs/hci` text were committed after that run; they change no code.
+
+| Screen | Desktop (dark) | Mobile (light) | Account / state |
+|---|---|---|---|
+| Groups list | [b-groups-1440](screens/b-groups-1440.png) | [b-groups-390](screens/b-groups-390.png) | E2E; one event, "Goa trip", 16–19 Oct, 4 people |
+| Expense sheet, Percent mode | [b-expense-modes-1440](screens/b-expense-modes-1440.png) | [b-expense-modes-390](screens/b-expense-modes-390.png) | ₹1,200 "Villa deposit", 40/20/20/20 % with the live ₹ preview |
+| Receipt canvas (itemized) | [b-receipt-canvas-1440](screens/b-receipt-canvas-1440.png) | [b-receipt-canvas-390](screens/b-receipt-canvas-390.png) | three lines, "Fresh lime soda" unassigned, tax ₹37.50, tip ₹60 |
+| Balances with "Why?" and the graph | [b-balances-why-1440](screens/b-balances-why-1440.png) | [b-balances-why-390](screens/b-balances-why-390.png) | the ₹900 dinner: you paid ₹500, Ravi ₹400; split between you, Asha and Ravi |
+| Settle sheet | [b-settle-1440](screens/b-settle-1440.png) | [b-settle-390](screens/b-settle-390.png) | second user (as Asha) paying ₹200; the payee has no UPI ID yet ("No QR yet") |
+| Join page | [b-join-1440](screens/b-join-1440.png) | [b-join-390](screens/b-join-390.png) | second user on the invite link; nothing preselected |
+| Bell with Confirm / Not received | [b-notification-confirm-1440](screens/b-notification-confirm-1440.png) | [b-notification-confirm-390](screens/b-notification-confirm-390.png) | the payee, after "I’ve paid" |
+| Friends | [b-friends-1440](screens/b-friends-1440.png) | [b-friends-390](screens/b-friends-390.png) | one incoming request, one friend, one search result |
+| Agent panel with a proposal | [c-panel-proposal-1440](screens/c-panel-proposal-1440.png) | [c-panel-proposal-390](screens/c-panel-proposal-390.png) | stubbed agent; pending ₹250 expense chip |
+| Voice status | [c-voice-status-1440](screens/c-voice-status-1440.png) | [c-voice-status-390](screens/c-voice-status-390.png) | hold to talk; "Listening…" while the microphone prompt is pending |
+| Assistant offline | [c-offline-1440](screens/c-offline-1440.png) | [c-offline-390](screens/c-offline-390.png) | health reports offline; the pill still opens quick add |
+
+---
+
+## 1. Who it's for
+
+The primary user is still Part A's **Anxious Budgeter**: personal money first, splitting second. Parts B and C keep that order:
+
+- A group expense reaches your own Coinflow only as **your share**, through a read-only mirror row in Activity.
+- Money you owe always counts against Safe-to-Spend. Money you are owed counts only if you allow it.
+- The assistant drafts and you decide. Nothing changes your money until you press Approve.
+
+The two group personas in the SRS (§1.3) gain what Part A deferred: events with people who are not on Coinflow yet, uneven payers and participants, an explanation for every suggested payment, and a settlement both people agree on.
+
+---
+
+## 2. Heuristic map
+
+Principles are cited as Nielsen heuristics (N1–N10), Jakob's law, recognition over recall, WCAG success criteria, and non-punitive feedback. Rows marked **(change from Part A)** depart from the earlier spec; the reason is in the row.
+
+| Interaction | Principle | How | Evidence |
+|---|---|---|---|
+| **Amount-first expense sheet** | Jakob's law; N4 consistency | The group sheet opens on Amount, then "What for?", then category chips, the same order as Part A's quick add. Payers and the split come after, with sensible defaults: you paid, split equally between everyone. | [b-expense-modes-1440](screens/b-expense-modes-1440.png); `e2e/groups.spec.ts › event → multi-payer subset expense → claim → balances → mark paid → confirm` |
+| **Avatar toggles for people** | Recognition over recall; N7 | "Paid by" and "Split between" are rows of avatar toggle buttons (`aria-pressed`), never a typed name. Leaving Dev out of a dinner is one tap. Placeholders have a dashed ring, so "not on Coinflow yet" is visible without colour. | [b-expense-modes-390](screens/b-expense-modes-390.png); the groups spec (Dev toggled off, `pressed: true` locator) |
+| **Live per-person preview, "₹X left to assign"** | N1 visibility of system status; N5 error prevention | Every mode (Equal, Exact amounts, Shares, Percent, Itemized) shows each person's ₹ share as you type, plus one status line: "4 people · shares add up to the total" or what is still missing. Multiple payers show "Payments add up to the total." or what is left. Save is refused with an inline alert next to the split, never a toast. | [b-expense-modes-1440](screens/b-expense-modes-1440.png); `lib/expense-form.test.ts › multiple payers: shows what is left and refuses to save until it adds up`; `lib/split.test.ts › percent that does not reach 100% names what is left` |
+| **Shares are never silently rescaled** | N3 user control; N5 | If you type exact amounts for ₹900 and then change the total to ₹1,000, the sheet says "₹100 left to assign"; it never stretches your numbers. Every split is integer paise and adds up exactly (largest remainder, ties by member order). | `lib/expense-form.test.ts › total changed after exact entries: says what is left instead of rescaling`; `lib/split.test.ts › indivisible totals always add up exactly, within a paisa of the exact share (500 cases)` |
+| **Receipt canvas: drag, or toggle** | N7 flexibility; WCAG 2.5.7 dragging movements (single-pointer alternative); status not by colour alone | Itemized mode lists each line with "Who had …" toggles. Dragging an avatar onto a line is a pointer shortcut for the same action; the drag strip is `aria-hidden` and has no focusable parts, so touch, keyboard and screen-reader users use the toggles. An untaken line says "Unassigned ₹180" in words, under the line and in the status. Tax, tip and discount follow what each person had. | [b-receipt-canvas-390](screens/b-receipt-canvas-390.png); `components/groups/receipt-canvas.tsx`; `lib/split.test.ts › itemized: tax, tip and discount follow each member’s item subtotal`; `lib/expense-form.test.ts › an itemized line nobody took is a field error on that item` |
+| **"Who pays whom" with "Why?"** | N1; N2 match with the real world; trust through explanation | Balances shows the fewest payments (greedy min-cash-flow, at most N−1). Each row has a "Why?" disclosure with a full sentence: "Asha pays you ₹200: Asha owes ₹300 across Dinner; you are owed ₹200 and Ravi ₹100." It uses names, not pronouns (ruling A10). | [b-balances-why-1440](screens/b-balances-why-1440.png); `lib/settle.test.ts › explains each payment with the debtor’s expenses and how their debt is split (spec §2.6 example)`; the groups spec asserts this exact sentence |
+| **The graph repeats the list** | N4; one source of truth | The React Flow graph below the list is decorative for assistive technology: it is `aria-hidden` and has no focusable parts. Tapping an arrow opens that row's "Why?", so the graph never says something the list does not. Edges stop animating under reduced motion. | [b-balances-why-1440](screens/b-balances-why-1440.png); `components/groups/settlement-graph.tsx` |
+| **Mark paid → confirm or reject** | N1; mutual agreement; nothing moves money | Settle up shows the payee's UPI QR (or "No QR yet" and plain steps), then "I’ve paid". The payee confirms or answers "Not received" from the bell. Only a confirmed payment changes balances. Pending marks are listed under "Waiting for confirmation" but never counted. | [b-settle-390](screens/b-settle-390.png), [b-notification-confirm-1440](screens/b-notification-confirm-1440.png); `server/services/groups/settlements.int.test.ts › mark → payee notified → confirm → mirrors, balances, and the payer is told`; `› reject tells the payer and moves no money`; the groups spec |
+| **Undo a mark only while pending** | N3, with honest limits | A mark has the usual 10 s undo. Once the payee has confirmed, undo is refused with a plain message, because the other person has already acted on it. | `server/services/groups/settlements.int.test.ts › undoing a mark the payee already confirmed is refused` |
+| **Joining: "Which one is you?"** | Recognition over recall; N5 | The invite page lists the placeholders and "I’m not listed". Nothing is preselected, because a claim is final. "Join group" without a choice shows an inline alert. Two people claiming the same name: one wins, and the other is told who took it. | [b-join-390](screens/b-join-390.png); the groups spec (no radio checked, inline alert); `server/services/groups/groups.int.test.ts › concurrent claims of one placeholder: exactly one wins, the other is told who took it` |
+| **Friends by exact email** (spec §3.8) | Privacy; N7 efficiency of use | Search finds only an exact, case-insensitive email, so nobody can browse accounts. An accepted request is standing consent: either friend can add the other straight into a group, with no link and no claim. "Link Asha to a friend" turns a placeholder into that friend and keeps Asha's history. Unfriending never rewrites shared money. | [b-friends-390](screens/b-friends-390.png); `e2e/friends.spec.ts › friend by email → accept from the bell → add to a group directly → they see it`; `server/services/friends.int.test.ts › search is exact and case-insensitive, and says how you are related`; `› decline is silent, cancel works, only the addressee accepts, and unfriending leaves groups alone`; `› linking a placeholder to a friend backfills their mirrors and is refused for strangers or taken names` |
+| **Personal-first money** | N2; user control | Only your **share** is your spending (Insights, budgets), while the cash you actually paid keeps the balance honest. `S = B − R + I − F + G`, where G is your group position. What you owe always counts. What you are owed counts only with "Count money owed to me in Safe-to-Spend" (Profile), applied per group. Settling never changes Safe-to-Spend. | `lib/safe-to-spend.test.ts › worked example: settling never changes S`; `› counts what you owe always, and what you are owed only when allowed — per group`; `server/services/safe-to-spend.int.test.ts › S moves by my share only; settling never changes S; owed money can be left out` |
+| **Proposals over drafts** (change from Part A) | N3 user control; N5; SRS staging requirement | Part A's spec said the agent "writes drafts". Spec §1 changes this: the agent never writes. It returns proposals that appear as chips ("Expense · not saved yet") with Approve, Edit and Dismiss. Approve saves through the same `/api/v1` route as a manual entry, with the same undo toast. The agent's own token is read-only. | [c-panel-proposal-1440](screens/c-panel-proposal-1440.png); `e2e/agent.spec.ts › a proposal is staged, then Approve saves it through the normal API with undo`; `app/api/v1/agent.api.int.test.ts › the AI never writes: an internal token reads (GET 200) but every write is refused with 403 read_only`; `apps/agent/tests/test_no_writes.py::test_the_user_client_cannot_write` |
+| **The agent asks instead of guessing** | N5; N9 | An amount the agent cannot pin down ("1,5") or a person who is not in the group produces a question, not a chip. The web proxy re-validates every proposal against the API schemas and drops any that fail or name a non-member. | `apps/agent/tests/test_tools.py::test_an_unclear_amount_is_asked_about_not_guessed`; `::test_unknown_member_asks_instead_of_proposing`; `app/api/v1/agent.api.int.test.ts › chat streams through and drops proposals that fail the API schemas or name a non-member` |
+| **Voice status as text** | N1; WCAG 4.1.3 status messages | Holding the mic (pointer, Space or Enter) sets "Listening…" before the permission prompt resolves, then "Transcribing…" and "Thinking…", in a `role="status"` line. Esc cancels the clip and keeps the panel open. A denied microphone gives "The microphone is blocked. Allow it in your browser settings, or type your message." Under reduced motion the waveform becomes a static level bar. | [c-voice-status-390](screens/c-voice-status-390.png); `e2e/agent.spec.ts › hold to talk shows "Listening…" as unobscured text at once; a blocked mic explains itself`; `lib/agent-chat.test.ts › shows Thinking… the moment a message is sent (spec §4.7: within 100 ms, as text)`; Task 4 smoke (b) |
+| **Coach** | Non-punitive feedback; N3 | Rules decide; the LLM may only reword, keeps every ₹ amount, adds no "!", and the template is used if anything looks wrong. At most two nudges a day, none in quiet hours, with an off switch ("Coach notifications", Profile). Nudges arrive in the same bell. | `apps/agent/tests/test_coach.py::test_tone_is_never_punitive`; `::test_at_most_two_a_day_in_priority_order`; `::test_quiet_hours_can_wrap_midnight`; `e2e/agent.spec.ts › a coach nudge written through the internal endpoint shows in the bell` |
+| **Assistant offline** | Graceful degradation; N1 | When the agent is down or no LLM is configured, the pill reads "Assistant offline · quick add still works" and opens the ⌘K palette. Everything else works. Quick add stays the first palette action for amount-led input either way. | [c-offline-390](screens/c-offline-390.png); `e2e/agent.spec.ts › assistant offline: the pill says so, and quick add still works`; `app/api/v1/agent.api.int.test.ts › agent unreachable → 503 agent_offline; health says offline; unconfigured → offline without calling out` |
+| **Bell, live then polled** | N1 | Notifications arrive over SSE and fall back to polling every 30 s. The unread count is in the button's name ("Notifications, 2 unread") and is announced politely when it changes. | [b-notification-confirm-1440](screens/b-notification-confirm-1440.png); the groups and friends specs wait for the bell over SSE or polling |
+
+---
+
+## 3. Accessibility evidence
+
+### 3.1 axe
+
+`e2e/groups-a11y.spec.ts` runs axe (WCAG 2 A/AA and 2.1 AA tags) on both projects (desktop dark, mobile light) and expects **zero serious or critical** violations on:
+
+- `/groups`, both empty and with a group;
+- every group tab: Expenses, Balances, Activity and Members;
+- the expense sheet in Itemized mode with a line added;
+- the settle sheet ("Pay Asha");
+- the Members tab with "Add from friends", and the "Who is Asha?" link dialog;
+- the agent panel;
+- `/join/<token>` for the second user;
+- `/friends` with a request, a friend and a search result.
+
+Each check first waits for the network and for every finite animation to finish. Without this, axe measured colours mid-fade on the groups list and the agent panel and reported contrast failures that do not exist at rest. This is the same rule Part A used for the undo toast: wait for it, never exclude it.
+
+**No elements are excluded.** Two things are deliberately hidden from assistive technology, and each has an accessible equivalent:
+
+- the receipt canvas's drag strip (the per-line toggles do the same);
+- the settlement graph (the payment list and "Why?" are the source).
+
+### 3.2 Reflow
+
+The same spec loads `/groups`, `/friends`, all four group tabs and `/join/<token>` at **390 and 320 px**, with reduced motion both off and on. It fails on any sideways page scroll. The four-tab row scrolls inside itself at 320 px.
+
+This check found a real bug: once a friend could be added, the Members tab was 356 px wide at 320 px. Its one-column grid used an implicit `auto` track, which grew to fit a friend's unbroken email. It now uses `grid-cols-1` (`minmax(0, 1fr)`), and `/friends` got the same fix (commit `58ac30b`).
+
+### 3.3 Keyboard paths
+
+- **Splitting.** Payers, participants and item owners are buttons with `aria-pressed`; Split mode is a radiogroup; Shares use −/+ steppers with a polite count. A split error is a `role="alert"` beside the split, and the inputs it names are `aria-invalid` and described by it.
+- **Receipt canvas.** Every drag action has a Tab-reachable toggle ("Who had Prawn curry" group).
+- **Hold to talk.** Space or Enter starts, release sends, Esc cancels (`aria-keyshortcuts="Space"`). The E2E drives the voice state with Space only.
+- **Focus after removal.** Answering the last friend request moves focus to the "Your friends" heading, not `<body>` (`e2e/friends.spec.ts › answering the last request on /friends keeps focus on the page, not <body>`). Accepting or confirming from the bell keeps focus on that notification.
+- **Bell links.** A notification that links to the same group's `?tab=balances` switches the tab without a reload (asserted in the groups spec).
+
+### 3.4 Problems found and fixed during this verification
+
+| Problem | Effect | Fix | Evidence |
+|---|---|---|---|
+| The group page (a server component) imported `GROUP_TABS` from the client `GroupView` | **Every** `/groups/[id]` load threw `GROUP_TABS.includes is not a function`; typecheck and build both passed | The tab list moved to `lib/group-display.ts`; a boundary test fails any server module under `src/app` that imports a non-component value from a client module | `app/client-boundary.test.ts`; `lib/group-display.test.ts › ?tab= resolves to a known tab, else the fallback`; commit `5df6e7e` |
+| Deleting a user who had created a group | Postgres set both `group_members.user_id` and `added_by` to null on the creator's row while the group cascaded away; the foreign key failed (affects Clerk `user.deleted`) | `deleteUser` deletes the user's groups first, in the same transaction | `server/services/users.int.test.ts › deleteUser removes a user who created a group, with the group, without an FK error (found in E2E reset)`; commit `e007bcd` |
+| Members tab at 320 px | sideways scroll (§3.2) | `grid-cols-1` | the reflow test; commit `58ac30b` |
+| The mic level meter sat on top of "Listening…" | the status text the spec requires was partly hidden while recording | the meter now floats to the right of the mic | `e2e/agent.spec.ts › hold to talk shows "Listening…" as unobscured text at once; a blocked mic explains itself` (it compares the two boxes); commit `82ca601` |
+
+**Accepted exception.** On phones the Ask pill's "+" (Part A quick add, a *personal* expense) and the group page's header button are both named "Add expense". They do different things. The group button is the one in `<main>`, and the E2E scopes to it. Renaming the pill's button is listed as future work in §6.
+
+---
+
+## 4. Evaluation plan hooks
+
+Part A §5 covered VM-1 and VM-4 for personal tasks. Part B makes the group metrics testable. The SRS (§5, "Verification & Academic Evaluation Framework") defines them as follows (quoted exactly):
+
+| Metric | Parameter | Evaluation protocol | Success benchmark |
+|---|---|---|---|
+| VM-1 | System Usability Scale (SUS) | 10-question standardized post-test survey | Score ≥80.0 (Grade A) |
+| VM-2 | Bill Allocation Efficiency | Timed task: 5 members, 10 itemized items | Completion time ≤60 s |
+| VM-3 | Algorithmic Transparency Rating | 7-point Likert scale on settlement clarity | Mean score ≥5.8/7.0 |
+| VM-4 | Cognitive Workload Reduction | NASA-TLX comparison against manual split apps | ≥30% drop in Mental Demand |
+
+How each one extends to Parts B and C:
+
+- **VM-1.** The single post-test SUS now covers T1–T13, so the group tasks count toward the same ≥ 80 score.
+- **VM-2.** Run as T13's longer variant: a printed 10-line receipt for 5 members, typed into the itemized canvas. It is timed from opening the sheet to Save.
+- **VM-3.** Asked right after T10. "How clear was it why you pay what you pay?" (1–7).
+- **VM-4.** NASA-TLX Mental Demand after T9–T11, against the participant's current method: Splitwise, a notes app or a spreadsheet. The baseline is that same task done with that method.
+
+**Setup** (in addition to Part A's): a second test account; the facilitator's account holds the "Goa trip" event from the screens, with Asha unclaimed. For T12, a configured LLM is required, or the facilitator runs the stubbed panel and says so. The real LLM was not part of the graded automated run.
+
+| Task | Prompt | Success criterion | Automated precedent |
+|---|---|---|---|
+| T8 | "Create an event for 5 people for your Goa trip. Two of them aren't on Coinflow." | Event with you + 4 people, 2 or more shown as "Hasn’t joined yet", within 90 s | `e2e/groups.spec.ts › event → multi-payer subset expense → claim → balances → mark paid → confirm` (creation part) |
+| T9 | "Log ₹900 dinner: you paid 500, Ravi paid 400, Dev wasn't there." | One expense: payers ₹500/₹400, participants You/Asha/Ravi; Balances shows "Asha pays you ₹200" and "Asha pays Ravi ₹100" | same spec (the identical expense and both rows); `server/services/groups/groups.int.test.ts › balances: multi-payer subset expense → nets and two payments, matching the SQL position` |
+| T10 | "Explain why you get ₹200 from Asha." | The participant opens "Why?" and restates the reason (Asha's ₹300 share of dinner is split between you and Ravi). Then VM-3. | same spec (the exact sentence); `lib/settle.test.ts › explains each payment with the debtor’s expenses and how their debt is split (spec §2.6 example)` |
+| T11 | (as Asha, second account) "Settle with the payee and get it confirmed." | "I’ve paid", then the payee confirms from the bell; the payment leaves Balances | same spec (mark → bell → Confirm); `server/services/groups/settlements.int.test.ts › mark → payee notified → confirm → mirrors, balances, and the payer is told` |
+| T12 | "Say '250 lunch with Asha' to Coinflow, then save it." | A ₹250 proposal chip is approved; it appears in Activity with undo available; the participant can say that nothing was saved before Approve | `e2e/agent.spec.ts › a proposal is staged, then Approve saves it through the normal API with undo` (stubbed); `apps/agent/tests/test_tools.py::test_group_expense_multi_payer_subset` |
+| T13 | "Scan this receipt and give the two dosas to Asha and the coffee to you." | Itemized split with 2 or more lines assigned, no "Unassigned" left, saved | `apps/agent/tests/test_receipt.py::test_a_receipt_that_adds_up`; `lib/split.test.ts › itemized: tax, tip and discount follow each member’s item subtotal`; no E2E (the camera needs a vision model) |
+
+**Proposed study-level targets** (ours, not SRS values): unaided completion of 80 % or more on T8–T11; on T10, at least 80 % of participants restate the reason correctly; on T12, no participant believes the chat saved something before Approve.
+
+---
+
+## 5. Performance notes
+
+**Speech to text.** The spec targets ≤ 2.5 s for clips under 15 s with faster-whisper `small` int8 on CPU. Neither measurement met it, and both were taken on a heavily loaded machine:
+
+- **Task 3:** 3.28 s, under a load average of 6–10.
+- **This task (Step 5):** the Docker run of `scripts/bench_speech.py` was killed by the Docker VM (exit 137, out of memory). That VM has 7.65 GiB, shared with about 6 GiB of unrelated containers. The same script run natively on macOS arm64 (10 cores) printed:
+
+  `clip 5.1 s · transcribed in 2.91 s · SLOW (target ≤ 2.5 s)`
+
+  The load average was **14.44** before the run and **16.61** after.
+
+The target is therefore **not demonstrated**. A run on an idle machine (or `base`, which measured 0.94 s in Task 3) is needed before claiming it.
+
+The bench synthesises its clip with Kokoro. On macOS, Kokoro's espeak fallback is disabled, so it dropped "Asha" and "Toit" from the audio. The transcript ("I paid 250 rupees for lunch with and Ravi at yesterday.") is faithful to that audio.
+
+**Min-cash-flow.** `lib/settle.test.ts › 50 members: ≤ N−1 payments, < 50 ms, and paying them settles everyone` asserts the < 50 ms bound for 50 members on every `pnpm test` run.
+
+---
+
+## 6. Known limitations & future work
+
+**Limitations**
+
+- **No web push.** Notifications are in-app only (SSE, then 30 s polling). This is out of scope by spec §8.
+- **Payments to placeholders wait for a claim** (ruling A7). "Waiting for Ravi to confirm" stays pending until someone claims Ravi.
+- **Speech runs in Docker.** On macOS, Kokoro's espeak fallback is disabled, so names may be skipped. STT latency is not demonstrated (§5).
+- **The coach's run marker lives in memory.** After a restart the scheduler may try again the same day. Per-key dedupe and the server's cap of two a day still stop duplicates.
+- **Quiet hours are stored but not editable.** The scheduler honours `quietHours`, but Profile has no control for it yet.
+- **Group expense `source` is not stored.** Only personal expenses keep `chat` / `voice` / `scan`.
+- **Two "Add expense" buttons on phones** (§3.4). The pill's "+" should be renamed "Add personal expense" on group pages.
+- **The real LLM is not evaluated here.** Its routing is covered only by pytest with a scripted fake LLM.
+
+**Ambiguity rulings** (from the plan; the spec is silent or contradicts itself)
+
+- **A1 Settlement sign:** net = paid − share + settlements paid − settlements received, the only arithmetic that keeps "settling never changes S".
+- **A2 Zero-cash mirrors:** the amount check allows `0` only for `source = 'group'`.
+- **A3 Positive G per group:** being owed in one group never hides what you owe in another.
+- **A4 Re-showable invite links:** the token is an HMAC of the invite id, and only its hash is stored, so Invite can show it again without revoking it.
+- **A5 `split_mismatch` field:** `field` is the input path, and the message names the amount left.
+- **A6 Group categories:** built-in, non-system expense categories only. "Settle up" categories are hidden from pickers.
+- **A7 Placeholders in settlements:** pending until claimed; cash *received* from a placeholder is confirmed at once, with no undo, after a confirmation question.
+- **A8 Group-expense PATCH:** takes the whole body. Deleting an expense notifies the people involved.
+- **A9 Coach scheduling:** hourly slots from 08:30 to 21:30 IST, once per user per day, outside quiet hours. The server caps it at two a day and dedupes.
+- **A10 "Why?" text:** uses the debtor's name, not a gendered pronoun.
+- **A11 Agent read tools:** `list_categories` and `get_group` were added. Proposal tools take rupee strings and names, and resolve them or ask.
+- **A12 One internal-token format:** used both ways. Service calls use `aud='coinflow-internal'`, `sub='svc:agent'`.
+- **A13 Speech extra:** installed in the Docker image only. Plain `uv sync` skips it, and health then reports `stt`/`tts` false.
+
+**Future work**
+
+- **The study:** §4, with the SRS VM-1 to VM-4 benchmarks.
+- **A configured LLM run:** T12 and T13 end to end, with a vision model for receipts.
+- **Notification channels:** web push or email for settlement confirmations, if the scope allows it.
