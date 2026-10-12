@@ -34,11 +34,20 @@ async function warm() {
 }
 
 async function measure(port: number, preset: 'desktop' | 'mobile'): Promise<Scores> {
-  const result = await lighthouse(
-    URL_,
-    { port, onlyCategories: ['performance', 'accessibility'], logLevel: 'error' },
-    preset === 'desktop' ? desktopConfig : undefined,
-  )
+  // A run can fail to record its trace (runtimeError NO_NAVSTART: "Please run Lighthouse again"; seen on the
+  // second run in one Chrome). That is a failed measurement, not a score of 0, so it is re-run once; a second
+  // failure still reports 0 and fails the gate.
+  let result: Awaited<ReturnType<typeof lighthouse>>
+  for (let attempt = 1; ; attempt++) {
+    result = await lighthouse(
+      URL_,
+      { port, onlyCategories: ['performance', 'accessibility'], logLevel: 'error' },
+      preset === 'desktop' ? desktopConfig : undefined,
+    )
+    const error = result?.lhr.runtimeError
+    if (!error || attempt === 2) break
+    console.warn(`Lighthouse ${preset}: ${error.code}; measuring again`)
+  }
   const cat = result?.lhr.categories
   return {
     performance: Math.round((cat?.performance?.score ?? 0) * 100),
