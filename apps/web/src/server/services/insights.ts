@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm'
+import { and, eq, gt, gte, isNull, lt, sql } from 'drizzle-orm'
 import { addDays, diffDays, istStartOfDay, type ISODate } from '@/lib/dates'
 import { getDb } from '@/server/db/client'
 import { categories, transactions } from '@/server/db/schema'
@@ -27,7 +27,7 @@ async function byCategory(userId: string, from: ISODate, to: ISODate) {
     })
     .from(transactions)
     .innerJoin(categories, eq(categories.id, transactions.categoryId))
-    .where(and(window(userId, from, to), eq(transactions.type, 'expense')))
+    .where(and(window(userId, from, to), eq(transactions.type, 'expense'), gt(transactions.personalShare, 0)))
     .groupBy(categories.id)
 }
 
@@ -40,11 +40,11 @@ export async function getInsights(userId: string, from: ISODate, to: ISODate): P
   const [totals, days, current, previous] = await Promise.all([
     db.select({
       expense: sql<number>`coalesce(sum(${transactions.personalShare}) filter (where ${transactions.type} = 'expense'), 0)`.mapWith(Number),
-      income: sql<number>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income'), 0)`.mapWith(Number),
+      income: sql<number>`coalesce(sum(${transactions.amount}) filter (where ${transactions.type} = 'income' and ${transactions.source} <> 'settlement'), 0)`.mapWith(Number),
     }).from(transactions).where(window(userId, from, to)),
     db.select({ date: istDay, expense: sql<number>`sum(${transactions.personalShare})`.mapWith(Number) })
       .from(transactions)
-      .where(and(window(userId, from, to), eq(transactions.type, 'expense')))
+      .where(and(window(userId, from, to), eq(transactions.type, 'expense'), gt(transactions.personalShare, 0)))
       .groupBy(istDay).orderBy(istDay),
     byCategory(userId, from, to),
     byCategory(userId, prevFrom, prevTo),

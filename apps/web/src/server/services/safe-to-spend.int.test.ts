@@ -5,6 +5,10 @@ import { transactionListQuerySchema } from '@/lib/schemas/transactions'
 import { getDb } from '@/server/db/client'
 import { transactions, users } from '@/server/db/schema'
 import { createCheckin } from './checkins'
+import { createGroup } from './groups/groups'
+import { claimInvite, getInvite } from './groups/invites'
+import { createGroupExpense } from './groups/expenses'
+import { markSettlement, resolveSettlement } from './groups/settlements'
 import { createRecurring, materializeDueRecurring } from './recurring'
 import { getSafeToSpend } from './safe-to-spend'
 import { confirmDraft, createTransaction, deleteTransaction, listTransactions } from './transactions'
@@ -136,5 +140,46 @@ describe('getSafeToSpend', () => {
       await createCheckin('user_a', 5_000_000, new Date('2026-10-11T09:30:00Z')) // 15:00 IST
       expect((await getSafeToSpend('user_a', LATER)).breakdown.balance).toBe(5_000_000)
     })
+  })
+})
+
+describe('Safe-to-Spend with groups (spec §2.4 worked example)', () => {
+  beforeEach(async () => {
+    await resetDb()
+    await makeUser('user_a', { name: 'Me' })
+    await makeUser('user_b', { name: 'Friend' })
+  })
+
+  it('S moves by my share only; settling never changes S; owed money can be left out', async () => {
+    const food = (await builtinCategory('Food & Dining')).id
+    const before = new Date(Date.now() - 60_000)
+    await createCheckin('user_a', 5_000_000, before)
+    await createCheckin('user_b', 5_000_000, before)
+    const { data: g } = await createGroup('user_a', { name: 'Dinner club', placeholders: [{ displayName: 'Friend' }, { displayName: 'Other' }] })
+    const friend = g.members.find((m) => m.displayName === 'Friend')!.id
+    const other = g.members.find((m) => m.displayName === 'Other')!.id
+    await claimInvite('user_b', (await getInvite('user_a', g.id)).url.split('/join/')[1], { memberId: friend })
+    const a0 = (await getSafeToSpend('user_a')).amount
+    const b0 = (await getSafeToSpend('user_b')).amount
+
+    // I pay ₹3,000 dinner for three.
+    await createGroupExpense('user_a', g.id, {
+      description: 'Dinner', amountPaise: 300_000, categoryId: food,
+      payers: [{ memberId: g.myMemberId, paidPaise: 300_000 }], split: { mode: 'equal', memberIds: [g.myMemberId, friend, other] },
+    })
+    const a1 = await getSafeToSpend('user_a')
+    const b1 = await getSafeToSpend('user_b')
+    expect(a1.breakdown.balance).toBe(5_000_000 - 300_000) // B −3,000 (cash)
+    expect(a1.breakdown.receivables).toBe(200_000) // G +2,000
+    expect(a1.amount).toBe(a0 - 100_000) // S −1,000
+    expect(b1.amount).toBe(b0 - 100_000) // friend: G −1,000
+
+    const { data: s } = await markSettlement('user_b', g.id, { fromMemberId: friend, toMemberId: g.myMemberId, amountPaise: 100_000 })
+    await resolveSettlement('user_a', s.id, 'confirmed')
+    expect((await getSafeToSpend('user_a')).amount).toBe(a1.amount)
+    expect((await getSafeToSpend('user_b')).amount).toBe(b1.amount)
+
+    await getDb().update(users).set({ countReceivables: false }).where(eq(users.id, 'user_a'))
+    expect((await getSafeToSpend('user_a')).breakdown.receivables).toBe(0)
   })
 })

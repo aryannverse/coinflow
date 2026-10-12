@@ -12,7 +12,7 @@ export async function listCategories(userId: string, kind?: 'expense' | 'income'
   return getDb()
     .select()
     .from(categories)
-    .where(kind ? and(visibleTo(userId), eq(categories.kind, kind)) : visibleTo(userId))
+    .where(and(visibleTo(userId), eq(categories.system, false), kind ? eq(categories.kind, kind) : undefined))
     .orderBy(asc(categories.sort), asc(categories.name))
 }
 
@@ -30,7 +30,7 @@ export async function requireUsableCategory(
   userId: string, categoryId: string, kind: 'expense' | 'income', executor: Db | Tx = getDb(),
 ): Promise<Category> {
   const [cat] = await executor.select().from(categories).where(and(eq(categories.id, categoryId), visibleTo(userId)))
-  if (!cat || cat.kind !== kind) {
+  if (!cat || cat.kind !== kind || cat.system) {
     throw invalid('categoryId', kind === 'expense' ? 'Pick an expense category.' : 'Pick an income category.')
   }
   return cat

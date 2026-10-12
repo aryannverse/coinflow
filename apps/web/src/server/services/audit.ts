@@ -4,17 +4,22 @@ import { getDb, type Tx } from '@/server/db/client'
 import { pgErrorCode } from '@/server/db/errors'
 import { auditLog, balanceCheckins, budgets, recurringItems, transactions } from '@/server/db/schema'
 import { conflict, notFound } from '@/server/errors'
+import { undoGroupChange } from './groups/undo'
 
-export type AuditEntity = 'transaction' | 'recurring_item' | 'budget' | 'balance_checkin'
+export type AuditEntity =
+  | 'transaction' | 'recurring_item' | 'budget' | 'balance_checkin'
+  | 'group_expense' | 'settlement' | 'group_member'
+type PersonalEntity = 'transaction' | 'recurring_item' | 'budget' | 'balance_checkin'
 export type AuditAction = 'create' | 'update' | 'delete' | 'restore' | 'confirm'
 export const UNDO_WINDOW_MS = 30_000
 
-const TABLES = {
+const GROUP_ENTITIES = new Set<AuditEntity>(['group_expense', 'settlement', 'group_member'])
+const TABLES: Record<PersonalEntity, typeof transactions | typeof recurringItems | typeof budgets | typeof balanceCheckins> = {
   transaction: transactions,
   recurring_item: recurringItems,
   budget: budgets,
   balance_checkin: balanceCheckins,
-} as const
+}
 
 const DATE_KEYS = new Set(['createdAt', 'updatedAt', 'occurredAt', 'deletedAt', 'takenAt'])
 
@@ -69,16 +74,26 @@ export async function undo(
     if (now.getTime() - entry.createdAt.getTime() > UNDO_WINDOW_MS) {
       throw conflict('undo_expired', 'It’s too late to undo that change.')
     }
+    const groupEntity = GROUP_ENTITIES.has(entry.entity)
     const [latest] = await tx
       .select({ id: auditLog.id })
       .from(auditLog)
-      .where(and(eq(auditLog.userId, userId), eq(auditLog.entity, entry.entity), eq(auditLog.entityId, entry.entityId)))
+      .where(and(
+        groupEntity ? undefined : eq(auditLog.userId, userId), // a co-member's later edit also makes this stale
+        eq(auditLog.entity, entry.entity), eq(auditLog.entityId, entry.entityId),
+      ))
       .orderBy(desc(auditLog.seq))
       .limit(1)
     if (latest.id !== entry.id) throw conflict('undo_stale', 'That item changed again, so this undo no longer applies.')
 
+    if (groupEntity) {
+      const { before, after } = await undoGroupChange(tx, entry, userId, now)
+      const restoreId = await recordAudit(tx, { userId, entity: entry.entity, entityId: entry.entityId, action: 'restore', before, after })
+      return { entity: entry.entity, entityId: entry.entityId, auditId: restoreId }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- one generic restore over four tables
-    const table = TABLES[entry.entity] as any
+    const table = TABLES[entry.entity as PersonalEntity] as any
     const ownRow = and(eq(table.id, entry.entityId), eq(table.userId, userId))
     const [current] = await tx.select().from(table).where(ownRow)
     const before = entry.before as Record<string, unknown> | null

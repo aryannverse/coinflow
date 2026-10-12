@@ -1,11 +1,12 @@
 import 'server-only'
 import { and, eq, gt, gte, isNull, or, sql } from 'drizzle-orm'
 import { istStartOfDay, toISTDate } from '@/lib/dates'
-import { computeSafeToSpend, type SafeToSpendResult } from '@/lib/safe-to-spend'
+import { computeSafeToSpend, groupPositionTerm, type SafeToSpendResult } from '@/lib/safe-to-spend'
 import { getDb } from '@/server/db/client'
 import { transactions } from '@/server/db/schema'
 import { notFound } from '@/server/errors'
 import { getLatestCheckin } from './checkins'
+import { groupPositionsForUser } from './groups/nets'
 import { listRecurring, materializeDueRecurring } from './recurring'
 import { getUser } from './users'
 
@@ -22,7 +23,7 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
 
   const user = await getUser(userId)
   if (!user) throw notFound('account')
-  const [checkin, recurring] = await Promise.all([getLatestCheckin(userId), listRecurring(userId)])
+  const [checkin, recurring, positions] = await Promise.all([getLatestCheckin(userId), listRecurring(userId), groupPositionsForUser(userId)])
 
   /**
    * What the check-in balance does not yet reflect (spec §4.11).
@@ -51,10 +52,10 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
       }
     : null
 
-  const [income, expenseShare, billDrafts, incomeDrafts] = since
+  const [income, expenseCash, billDrafts, incomeDrafts] = since
     ? await Promise.all([
         sumWhere(since('income', 'confirmed')),
-        sumWhere(since('expense', 'confirmed'), transactions.personalShare),
+        sumWhere(since('expense', 'confirmed')),
         sumWhere(since('expense', 'draft')),
         sumWhere(since('income', 'draft')),
       ])
@@ -64,10 +65,10 @@ export async function getSafeToSpend(userId: string, now: Date = new Date()): Pr
     today,
     paydayDay: user.paydayDay,
     fixedCostsEstimate: user.fixedCostsEstimate,
-    receivables: 0, // Part B
+    receivables: groupPositionTerm(positions, user.countReceivables),
     checkin: checkin ? { amount: checkin.amount } : null,
     confirmedIncomeSinceCheckin: income,
-    confirmedExpenseCashSinceCheckin: expenseShare,
+    confirmedExpenseCashSinceCheckin: expenseCash,
     pendingBillDrafts: billDrafts,
     pendingIncomeDrafts: incomeDrafts,
     recurring: recurring.map((r) => ({

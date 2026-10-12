@@ -4,13 +4,15 @@ import { addDays, istStartOfDay } from '@/lib/dates'
 import { uuid } from '@/lib/schemas/common'
 import type { TransactionCreate, TransactionListQuery, TransactionPatch } from '@/lib/schemas/transactions'
 import { getDb, type Tx } from '@/server/db/client'
-import { categories, transactions, type Transaction } from '@/server/db/schema'
-import { invalid, notFound } from '@/server/errors'
+import { categories, groupExpenses, groups, settlements, transactions, type Transaction } from '@/server/db/schema'
+import { conflict, invalid, notFound } from '@/server/errors'
 import { recordAudit } from './audit'
 import { requireUsableCategory } from './categories'
 
 export type TransactionWithCategory = Transaction & {
   category: { id: string; name: string; emoji: string; color: string }
+  /** Set on mirrors (spec §2.2): Activity shows a group badge and opens the group, never the edit sheet. */
+  group: { id: string; name: string; emoji: string } | null
 }
 
 async function findOwned(executor: Tx, userId: string, id: string, status?: 'draft' | 'confirmed'): Promise<Transaction> {
@@ -23,6 +25,9 @@ async function findOwned(executor: Tx, userId: string, id: string, status?: 'dra
     ))
     .for('update')
   if (!row) throw notFound('transaction')
+  if (row.source === 'group' || row.source === 'settlement') {
+    throw conflict('mirror_readonly', 'This came from a group. Change it in the group instead.')
+  }
   return row
 }
 
@@ -47,7 +52,7 @@ export async function createTransaction(
         note: input.note ?? null,
         method: input.method,
         occurredAt: input.occurredAt,
-        source: opts.source ?? 'manual',
+        source: opts.source ?? input.source ?? 'manual',
         status: opts.status ?? 'confirmed',
         recurringItemId: opts.recurringItemId ?? null,
       })
@@ -126,9 +131,13 @@ export async function listTransactions(
     .select({
       ...getTableColumns(transactions),
       category: { id: categories.id, name: categories.name, emoji: categories.emoji, color: categories.color },
+      group: { id: groups.id, name: groups.name, emoji: groups.emoji },
     })
     .from(transactions)
     .innerJoin(categories, eq(categories.id, transactions.categoryId))
+    .leftJoin(groupExpenses, eq(groupExpenses.id, transactions.groupExpenseId))
+    .leftJoin(settlements, eq(settlements.id, transactions.settlementId))
+    .leftJoin(groups, sql`${groups.id} = coalesce(${groupExpenses.groupId}, ${settlements.groupId})`)
     .where(and(
       eq(transactions.userId, userId),
       isNull(transactions.deletedAt),
