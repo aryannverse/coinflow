@@ -3,6 +3,7 @@ import { Mic } from 'lucide-react'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useReducedMotion } from '@/components/providers/motion-pref'
 import { api, ApiError } from '@/lib/api-client'
+import { audioFileName } from '@/lib/audio-file'
 import { cn } from '@/lib/utils'
 import { useAgent } from './agent-provider'
 
@@ -129,7 +130,7 @@ export function MicButton({ available }: { available: boolean }) {
     }
     agent.chat.setStatus('transcribing')
     const form = new FormData()
-    form.append('file', new Blob(r.chunks, { type }), type.includes('mp4') ? 'voice.mp4' : 'voice.webm')
+    form.append('file', new Blob(r.chunks, { type }), audioFileName(type))
     try {
       const { data } = await api<{ data: { text: string } }>('/agent/stt', { method: 'POST', body: form })
       if (!data.text.trim()) {

@@ -83,7 +83,7 @@ async def test_groq_transcribes_in_memory_with_whisper_turbo(groq):
     assert req.headers["authorization"] == "Bearer gsk_test"
     body = req.content
     assert b'name="model"\r\n\r\nwhisper-large-v3-turbo' in body
-    assert b'name="response_format"\r\n\r\njson' in body
+    assert b'name="response_format"\r\n\r\nverbose_json' in body  # always: Groq's duration is a second 30 s check
     assert b'name="language"\r\n\r\nen' in body
     assert b'filename="voice.wav"' in body and clip in body
 
@@ -342,3 +342,137 @@ def test_blank_values_in_the_env_file_mean_the_defaults(tmp_path):
         "light",
         "af_heart",
     )
+
+
+# ---- review fixes (round 1) ------------------------------------------------------------------------------------------
+
+
+async def test_groqs_duration_is_enforced_even_when_the_probe_said_short(groq):
+    rec = Recorder(lambda req: httpx.Response(200, json={"text": "long", "duration": 31.2}))
+    with pytest.raises(speech.AudioTooLong):
+        await groq_speech.transcribe(wav_bytes(3), "voice.wav", "audio/wav", groq, transport=rec.transport())
+    ok = Recorder(lambda req: httpx.Response(200, json={"text": "fine", "duration": 30.4}))
+    assert await groq_speech.transcribe(wav_bytes(3), "voice.wav", "audio/wav", groq, transport=ok.transport()) == "fine"
+
+
+@pytest.mark.parametrize(
+    ("content_type", "sent"),
+    [("audio/webm", "voice.webm"), ("audio/ogg", "voice.ogg"), ("audio/mp4", "voice.mp4"), ("audio/x-wav", "voice.wav")],
+)
+async def test_the_upload_name_follows_the_content_type(groq, content_type, sent):
+    rec = Recorder(lambda req: httpx.Response(200, json={"text": "ok", "duration": 1.0}))
+    await groq_speech.transcribe(b"\x00" * 64, "blob", content_type, groq, transport=rec.transport())
+    assert f'filename="{sent}"'.encode() in rec.requests[0].content  # Groq infers the format from the extension
+
+
+def wav_raw(fmt_tag: int, channels: int, rate: int, bits: int, payload: bytes, *, data_size: int | None = None) -> bytes:
+    block = channels * bits // 8
+    fmt = struct.pack("<HHIIHH", fmt_tag, channels, rate, rate * block, block, bits)
+    size = len(payload) if data_size is None else data_size
+    body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", size) + payload
+    return b"RIFF" + struct.pack("<I", 0xFFFFFFFF if data_size is not None else 4 + len(body) - 4) + body
+
+
+def parse_wav(data: bytes) -> tuple[bytes, bytes]:
+    fmt = data[
+        data.index(b"fmt ") + 8 : data.index(b"fmt ")
+        + 8
+        + struct.unpack("<I", data[data.index(b"fmt ") + 4 : data.index(b"fmt ") + 8])[0]
+    ]
+    at = data.index(b"data")
+    size = struct.unpack("<I", data[at + 4 : at + 8])[0]
+    assert struct.unpack("<I", data[4:8])[0] == len(data) - 8  # a real, finite RIFF size
+    return fmt, data[at + 8 : at + 8 + size]
+
+
+@pytest.mark.parametrize(
+    ("fmt_tag", "bits", "data_size"),
+    [(1, 16, None), (3, 32, None), (1, 16, 0xFFFFFFFF), (1, 16, 0), (3, 32, 0xFFFFFFFF)],
+)
+def test_wavs_are_joined_by_their_bytes_whatever_the_header_says(fmt_tag, bits, data_size):
+    a, b = b"\x01\x02" * 8 * (bits // 16), b"\x03\x04" * 4 * (bits // 16)
+    joined = groq_speech.join_wavs(
+        [wav_raw(fmt_tag, 1, 24_000, bits, a, data_size=data_size), wav_raw(fmt_tag, 1, 24_000, bits, b, data_size=data_size)]
+    )
+    fmt, payload = parse_wav(joined)
+    assert struct.unpack("<HHI", fmt[:8]) == (fmt_tag, 1, 24_000) and payload == a + b
+
+
+def test_mismatched_wav_formats_are_an_upstream_error():
+    with pytest.raises(groq_speech.SpeechUpstreamError):
+        groq_speech.join_wavs([wav_raw(1, 1, 24_000, 16, b"\x00\x00"), wav_raw(1, 1, 22_050, 16, b"\x00\x00")])
+    with pytest.raises(groq_speech.SpeechUpstreamError):
+        groq_speech.join_wavs([b"not a wav", wav_raw(1, 1, 24_000, 16, b"\x00\x00")])
+
+
+async def test_tts_retries_a_rate_limited_piece_once(groq, monkeypatch):
+    monkeypatch.setattr(groq_speech, "RETRY_WAIT_S", 0.0)
+    calls: dict[str, int] = {}
+
+    def respond(req: httpx.Request) -> httpx.Response:
+        text = json.loads(req.content)["input"]
+        calls[text] = calls.get(text, 0) + 1
+        if calls[text] == 1 and text.startswith("Second"):
+            return httpx.Response(429, headers={"retry-after": "0"}, json={"error": {"code": "rate_limit_exceeded"}})
+        return httpx.Response(200, content=wav_bytes(0.5, 24_000))
+
+    text = "First sentence here. " * 6 + "Second part follows. " * 6
+    out = await groq_speech.synthesize(text.strip(), groq, transport=Recorder(respond).transport())
+    assert out.startswith(b"RIFF") and max(calls.values()) == 2
+    always = Recorder(lambda req: httpx.Response(429, json={"error": {"code": "rate_limit_exceeded"}}))
+    with pytest.raises(groq_speech.SpeechUpstreamError) as exc:
+        await groq_speech.synthesize("Hi.", groq, transport=always.transport())
+    assert exc.value.status == 429 and len(always.requests) == 2  # one retry, then give up
+
+
+async def test_tts_pieces_run_at_most_two_at_a_time_and_stay_in_order(groq):
+    import asyncio
+
+    active, peak, order = 0, 0, []
+
+    class Slow(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, req: httpx.Request) -> httpx.Response:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            i = int(json.loads(req.content)["input"].split()[1])
+            order.append(i)
+            return httpx.Response(200, content=wav_raw(1, 1, 24_000, 16, struct.pack("<h", i)))
+
+    text = " ".join(f"Piece {i} " + "x" * 180 + "." for i in range(6))
+    out = await groq_speech.synthesize(text, groq, transport=Slow())
+    _fmt, payload = parse_wav(out)
+    assert peak == 2 and list(struct.unpack("<6h", payload)) == [0, 1, 2, 3, 4, 5]
+
+
+def test_groq_error_codes_are_logged_and_terms_get_a_friendly_message(groq, caplog):
+    body = {"error": {"code": "model_terms_required", "message": "accept terms gsk_test", "type": "invalid_request_error"}}
+    c, _ = api(groq, lambda req: httpx.Response(400, json=body))
+    with caplog.at_level("WARNING"):
+        r = c.post("/tts", json={"text": "Hello"}, headers=bearer())
+    assert r.status_code == 503 and r.json()["error"] == {
+        "code": "tts_unavailable",
+        "message": "Read-aloud isn’t enabled on the Groq account yet.",
+    }
+    assert "model_terms_required" in caplog.text
+    assert "gsk_test" not in caplog.text and "accept terms" not in caplog.text and "gsk" not in r.text
+    caplog.clear()
+    c, _ = api(groq, lambda req: httpx.Response(400, json=body))
+    with caplog.at_level("WARNING"):
+        r = c.post("/stt", files={"file": ("voice.wav", wav_bytes(2), "audio/wav")}, headers=bearer())
+    assert r.status_code == 503 and r.json()["error"]["message"] == "Voice isn’t enabled on the Groq account yet."
+    assert "model_terms_required" in caplog.text and "gsk_test" not in caplog.text
+
+
+async def test_only_a_plain_error_code_is_kept_from_groq(groq):
+    for body in ({"error": {"code": "x" * 200}}, {"error": {"code": "has spaces gsk_1"}}, {"error": "flat"}, ["odd"]):
+        rec = Recorder(lambda req, b=body: httpx.Response(400, json=b))
+        with pytest.raises(groq_speech.SpeechUpstreamError) as exc:
+            await groq_speech.synthesize("Hi.", groq, transport=rec.transport())
+        assert exc.value.code is None
+    rec = Recorder(lambda req: httpx.Response(500, text="<html>gsk_1</html>"))
+    with pytest.raises(groq_speech.SpeechUpstreamError) as exc:
+        await groq_speech.synthesize("Hi.", groq, transport=rec.transport())
+    assert exc.value.code is None

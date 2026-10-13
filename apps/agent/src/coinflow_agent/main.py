@@ -282,7 +282,7 @@ def create_app(
             return err(413, "audio_too_large", "That recording is too big. Keep voice notes under 30 seconds.")
         try:
             if s.stt_provider == "groq":
-                name = file.filename or "voice.webm"
+                name = file.filename or "voice.webm"  # groq_speech names the upload after content_type when it knows it
                 text = await groq_speech.transcribe(data, name, content_type, s, transport=request.app.state.speech_transport)
             else:
                 text = await run_in_threadpool(speech.transcribe_bytes, data, s)
@@ -291,7 +291,9 @@ def create_app(
         except groq_speech.SpeechTimeout:
             return err(504, "stt_timeout", "Transcribing took too long. Try again, or type it.")
         except groq_speech.SpeechUpstreamError as exc:
-            log.warning("stt provider error %s", exc.status)
+            log.warning("stt provider error status=%s code=%s", exc.status, exc.code)  # Groq's code only, never its message
+            if exc.terms_required:
+                return err(503, "stt_unavailable", "Voice isn’t enabled on the Groq account yet.")
             if exc.client_error:
                 return err(422, "audio_unreadable", "I couldn’t make that out. Try again, or type it.")
             return err(503, "stt_unavailable", "Voice is busy right now. Try again in a moment, or type it.")
@@ -314,6 +316,11 @@ def create_app(
                 wav = await run_in_threadpool(speech.synthesize_wav, body.text, s)
         except groq_speech.SpeechTimeout:
             return err(504, "tts_timeout", "Reading that aloud took too long.")
+        except groq_speech.SpeechUpstreamError as exc:
+            log.warning("tts provider error status=%s code=%s", exc.status, exc.code)  # Groq's code only, never its message
+            if exc.terms_required:  # Orpheus needs its terms accepted in the Groq console (runbook step 9)
+                return err(503, "tts_unavailable", "Read-aloud isn’t enabled on the Groq account yet.")
+            return err(502, "tts_failed", "Couldn’t read that aloud.")
         except Exception:
             log.exception("tts failed")
             return err(502, "tts_failed", "Couldn’t read that aloud.")
@@ -352,6 +359,8 @@ def create_app(
             return err(404, "not_found", "Not found.")
         if not cron_authorized(s, authorization):
             return err(401, "unauthorized", "Missing or wrong cron secret.")
+        if not s.coach_enabled:  # COACH_ENABLED=false turns the coach off in cron mode too
+            return JSONResponse({"users": 0, "sent": 0, "skipped": 0, "failed": 0, "disabled": True})
         client = InternalClient(s.coinflow_api_url, s.agent_shared_secret, transport=request.app.state.api_transport)
         try:
             summary = await CoachRunner(client, polish=make_polisher(s)).run_all()

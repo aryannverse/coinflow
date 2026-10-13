@@ -12,7 +12,7 @@ from datetime import date
 from typing import Literal
 
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .money import parse_rupees_to_paise
 
@@ -35,12 +35,17 @@ _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 
 class RawItem(BaseModel):
+    model_config = ConfigDict(coerce_numbers_to_str=True)  # a model may write 320 instead of "320"; _signed parses either
+
     name: str
     amount: str
 
 
 class RawReceipt(BaseModel):
-    """What the vision model must return (OpenAI strict json_schema: every field required, nullable where optional)."""
+    """What the vision model must return (OpenAI strict json_schema: every field required, nullable where optional).
+    Numbers are accepted for the money fields and kept as text, so _signed reads them the same way as strings."""
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     merchant: str | None
     date: str | None

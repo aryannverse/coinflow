@@ -153,3 +153,20 @@ async def test_json_schema_mode_is_still_available():
 
 def test_receipt_json_mode_defaults_to_json_object():
     assert Settings(_env_file=None).receipt_json_mode == "json_object"
+
+
+async def test_numeric_amounts_are_read_as_text_not_rejected():
+    numeric = (
+        '{"merchant": "SPICE GARDEN", "date": "2026-10-12", "items": [{"name": "Paneer tikka", "amount": 320}],'
+        ' "tax": 24.5, "tip": null, "discount": 50, "total": 294.5, "confidence": 0.9}'
+    )
+    raw = await read_receipt(ScriptedChatModel(script=[say(numeric)]), PNG_BYTES, "image/png")
+    assert (raw.items[0].amount, raw.tax, raw.discount, raw.total) == ("320", "24.5", "50", "294.5")
+    r = normalize_receipt(raw)
+    assert (r.items[0].amountPaise, r.taxPaise, r.discountPaise, r.totalPaise, r.mismatch) == (
+        32_000,
+        2_450,
+        5_000,
+        29_450,
+        False,
+    )

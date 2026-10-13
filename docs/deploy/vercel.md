@@ -69,6 +69,9 @@ Call them:
    - **Plan:** Free.
    - **Name:** `coinflow`.
 4. When asked which environments to connect, keep **Production** (Preview and Development can stay on too).
+   - If the dialog shows **Custom Prefix** (an environment variable prefix), **leave it empty**. The app reads exactly
+     `DATABASE_URL` and `DATABASE_URL_UNPOOLED`; a prefix such as `STORAGE_` would rename them to
+     `STORAGE_DATABASE_URL` and the app wouldn't find them.
    - Don't turn on preview branching. Preview databases are out of scope.
 5. Click **Connect**.
 
@@ -110,8 +113,16 @@ Run the same command again after any future change that adds a migration, before
 4. Name it `coinflow-qr`. For the region, choose Mumbai (`bom1`) if it's offered.
 5. Connect it to `coinflow-web` for **Production** (and Preview if you like).
 
-On Vercel the SDK signs in with OIDC automatically. If the dashboard also shows a `BLOB_READ_WRITE_TOKEN`, that's
-fine; you don't need to copy it anywhere.
+Connecting the store adds its credentials to `coinflow-web` automatically. Depending on the dashboard version, that is
+`BLOB_READ_WRITE_TOKEN`, or `BLOB_STORE_ID` (which works with the OIDC token Vercel gives every deployment), or both.
+Check under **Settings → Environment Variables** that at least one of them is there for **Production**, and don't delete
+it. The `@vercel/blob` SDK looks for credentials in this order:
+
+1. OIDC token plus `BLOB_STORE_ID`;
+2. `BLOB_READ_WRITE_TOKEN`;
+3. if neither is set, it fails with "No blob credentials found".
+
+Connect the store before you redeploy: variables only reach new deployments.
 
 ## 5. Create the agent project
 
@@ -150,7 +161,7 @@ Add each variable in **Settings → Environment Variables** for **Production**. 
 | `DATABASE_URL` | Pooled Neon URL | Auto (step 2) |
 | `DATABASE_URL_UNPOOLED` | Direct Neon URL | Auto (step 2) |
 | `STORAGE_DRIVER` | `vercel-blob` | Type it. Vercel's disk is read-only, so the local driver can't work there |
-| `BLOB_READ_WRITE_TOKEN` | (leave unset) | Not needed on Vercel (OIDC). Auto if the dashboard adds it |
+| `BLOB_READ_WRITE_TOKEN` and/or `BLOB_STORE_ID` | (don't type them) | Auto (step 4), added when the Blob store is connected. At least one must be present; see step 4 |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` | Clerk dashboard → **Configure → API keys** (development instance) |
 | `CLERK_SECRET_KEY` | `sk_test_…` | Same page |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | `whsec_…` | Step 8 |
@@ -208,8 +219,9 @@ out of scope.
 
 1. **Accept the Orpheus terms.** This is required for "Read replies aloud". Open
    <https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english> while signed in as the org owner, and
-   accept the model terms. Until you do, every read-aloud request fails with Groq's `model_terms_required` error, and
-   Coinflow shows "Couldn't read that aloud". The live check on 2026-10-13 hit exactly this.
+   accept the model terms. Until you do, every read-aloud request fails with Groq's `model_terms_required` error:
+   Coinflow shows "Read-aloud isn't enabled on the Groq account yet", and the agent logs
+   `tts provider error status=400 code=model_terms_required`. The live check on 2026-10-13 hit exactly this.
 2. Speech-to-text uses `whisper-large-v3-turbo` and needs no extra step.
 3. Free-tier limits to keep in mind:
    - gpt-oss models: 8,000 tokens a minute.
@@ -268,6 +280,7 @@ Open `https://coinflow-web.vercel.app` in a fresh browser window and check each 
 | The pill says "Assistant offline" | `AGENT_URL` is wrong, or `AGENT_SHARED_SECRET` differs between the projects, or the agent's `/health` shows `chat:false` (check `LLM_*` and `AGENT_DATABASE_URL`) |
 | The agent fails at start with a database error | `AGENT_DATABASE_URL` is the pooled URL (it must be the direct one, with no `-pooler` in the host) or is missing `?sslmode=require` |
 | Notifications only update every 30 s | `DATABASE_URL_UNPOOLED` is missing on the web project, so the live listener can't connect. The 30 s polling fallback still works |
+| Logs show `Vercel Blob: No blob credentials found` | The Blob store isn't connected to `coinflow-web` for Production, so neither `BLOB_READ_WRITE_TOKEN` nor `BLOB_STORE_ID` exists. Connect it (step 4), check the variables under **Settings → Environment Variables**, then redeploy |
 | QR upload fails with a 500 | `STORAGE_DRIVER` isn't `vercel-blob`, or the Blob store isn't connected to `coinflow-web`, or it was created as public |
 | "That photo is over 4 MB" | The photo is still over 4 MB after shrinking (rare), or the browser couldn't shrink it (for example HEIC). Take a screenshot of it instead |
 | `/health` shows `stt:false` or `tts:false` | `STT_PROVIDER`/`TTS_PROVIDER` aren't `groq`, or `LLM_API_KEY` is missing |

@@ -54,7 +54,8 @@ async def test_run_all_reports_users_with_nothing_to_say_as_neither_sent_nor_fai
 
 
 def cron_app(settings, users: list[dict], posted: list[dict], **over) -> TestClient:  # noqa: ANN001, ANN003
-    s = settings.model_copy(update={"coach_mode": "cron", "cron_secret": CRON, **over})
+    # The shared fixture has the coach off; these runs need it on (COACH_ENABLED=false is honoured, see the last test).
+    s = settings.model_copy(update={"coach_mode": "cron", "cron_secret": CRON, "coach_enabled": True, **over})
     return TestClient(create_app(s, api_transport=digest_transport(users, posted), start_coach=False))
 
 
@@ -94,7 +95,7 @@ def test_coach_run_reports_a_digest_failure_without_leaking_details(settings):
     def down(req: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"error": {"code": "boom", "message": "stack trace"}})
 
-    s = settings.model_copy(update={"coach_mode": "cron", "cron_secret": CRON})
+    s = settings.model_copy(update={"coach_mode": "cron", "cron_secret": CRON, "coach_enabled": True})
     c = TestClient(create_app(s, api_transport=httpx.MockTransport(down), start_coach=False))
     r = c.post("/coach/run", headers={"authorization": f"Bearer {CRON}"})
     assert r.status_code == 502 and r.json()["error"]["code"] == "coach_failed" and "stack" not in r.text
@@ -108,3 +109,14 @@ def test_cron_mode_never_starts_the_scheduler(settings, monkeypatch):
     s = settings.model_copy(update={"coach_mode": "cron", "coach_enabled": True, "cron_secret": CRON})
     with TestClient(create_app(s, start_coach=True)) as c:
         assert c.get("/health").status_code == 200
+
+
+def test_coach_enabled_false_is_honoured_in_cron_mode(settings):
+    def never(req: httpx.Request) -> httpx.Response:
+        raise AssertionError("the digest must not be called when the coach is off")
+
+    s = settings.model_copy(update={"coach_mode": "cron", "cron_secret": CRON, "coach_enabled": False})
+    c = TestClient(create_app(s, api_transport=httpx.MockTransport(never), start_coach=False))
+    assert c.post("/coach/run").status_code == 401  # the secret still comes first
+    r = c.get("/coach/run", headers={"authorization": f"Bearer {CRON}"})
+    assert r.status_code == 200 and r.json() == {"users": 0, "sent": 0, "skipped": 0, "failed": 0, "disabled": True}
