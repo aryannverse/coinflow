@@ -1,9 +1,9 @@
 'use client'
 import { useQuery } from '@tanstack/react-query'
+import type { AgentHealth } from '@/lib/agent-health'
 import { api } from '@/lib/api-client'
 
-export type AgentCapabilities = { chat: boolean; vision: boolean; stt: boolean; tts: boolean }
-export type AgentHealth = { online: boolean; capabilities: AgentCapabilities | null }
+export type { AgentCapabilities, AgentHealth } from '@/lib/agent-health'
 
 export const useAgentHealth = () =>
   useQuery({

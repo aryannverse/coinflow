@@ -5,6 +5,7 @@ import type { BudgetPayloadInput, RecurringPayloadInput } from './proposal-edit-
 import { AgentPanel } from './agent-panel'
 import { ProposalEditDialogs } from './proposal-edit-dialogs'
 import { useAgentChat, type AgentRouteContext } from './use-agent-chat'
+import { agentHealthState, type AgentHealthState } from '@/lib/agent-health'
 import { useAgentHealth, type AgentHealth } from './use-agent-health'
 
 type Editing = { kind: 'recurring'; payload: RecurringPayloadInput } | { kind: 'budget'; payload: BudgetPayloadInput } | null
@@ -15,6 +16,7 @@ type AgentCtx = {
   draft: string
   setDraft: (s: string) => void
   health: AgentHealth | undefined
+  healthState: AgentHealthState
   chat: ReturnType<typeof useAgentChat>
   context: AgentRouteContext
   editing: Editing
@@ -32,15 +34,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   const groupId = GROUP_PATH.exec(pathname)?.[1]
   const context = useMemo<AgentRouteContext>(() => ({ route: pathname, ...(groupId ? { groupId } : {}) }), [pathname, groupId])
   const chat = useAgentChat()
-  const health = useAgentHealth().data
+  const healthQuery = useAgentHealth()
+  const health = healthQuery.data
+  const healthState = agentHealthState(healthQuery)
   const open = useCallback((prefill?: string) => {
     if (prefill !== undefined) setDraft(prefill)
     setOpen(true)
   }, [])
   const close = useCallback(() => setOpen(false), [])
   const value = useMemo(
-    () => ({ isOpen, open, close, draft, setDraft, health, chat, context, editing, setEditing }),
-    [isOpen, open, close, draft, health, chat, context, editing],
+    () => ({ isOpen, open, close, draft, setDraft, health, healthState, chat, context, editing, setEditing }),
+    [isOpen, open, close, draft, health, healthState, chat, context, editing],
   )
   return (
     <Ctx.Provider value={value}>

@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { useReturnFocus } from '@/components/groups/sheet-frame'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { lastFinishedReply, STATUS_TEXT } from '@/lib/agent-chat'
+import { healthStatusText } from '@/lib/agent-health'
 import { useAgent } from './agent-provider'
 import { Composer } from './composer'
 import { MessageList } from './message-list'
@@ -27,7 +28,9 @@ export function AgentPanel() {
   const drafts = state.items.filter((it) => it.role === 'proposal' && it.state === 'pending').length
   const announcement = [reply?.text, drafts ? `${drafts === 1 ? 'One draft' : `${drafts} drafts`} to review: Approve, Edit or Dismiss.` : '']
     .filter(Boolean).join(' ')
-  const statusText = state.status === 'thinking' && state.toolLabel ? state.toolLabel : STATUS_TEXT[state.status]
+  // While idle, the line also reports the health check: "Connecting…" (the pill opens this panel before it answers).
+  const statusText = state.status === 'thinking' && state.toolLabel ? state.toolLabel
+    : state.status === 'idle' ? healthStatusText(agent.healthState) : STATUS_TEXT[state.status]
 
   // DOM-only effects (no setState): keep the newest message in view; read finished replies aloud when asked to.
   useEffect(() => {

@@ -1,13 +1,13 @@
 'use client'
 import { useCallback, useReducer, useRef } from 'react'
 import { chatReducer, initialChat, type ChatStatus, type ProposalState, type Source } from '@/lib/agent-chat'
+import { AGENT_OFFLINE_TEXT as OFFLINE } from '@/lib/agent-health'
 import type { PlanProgress } from '@/lib/proposal-apply'
 import { createSSEParser } from '@/lib/sse'
 import { uid } from '@/lib/uid'
 
 export type AgentRouteContext = { route: string; groupId?: string }
 const newThreadId = () => uid().replace(/-/g, '').slice(0, 24)
-const OFFLINE = 'Assistant offline. Everything else still works.'
 
 /** One conversation per page session. Streams the proxy's SSE into the reducer; never throws to the UI. */
 export function useAgentChat() {
