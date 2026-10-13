@@ -8,7 +8,7 @@ This runbook puts Coinflow online on the free **Vercel Hobby** plan. You end up 
 | `coinflow-web` | `apps/web` | The Next.js website and its `/api/v1` backend |
 | `coinflow-agent` | `apps/agent` | The Python (FastAPI) AI assistant: chat, receipts, voice, the daily coach |
 
-They share one **Neon Postgres** database (in Mumbai), a private **Vercel Blob** store holds UPI QR images, and **Groq**
+They share one **Neon Postgres** database (in Singapore, the nearest Neon region to India), a private **Vercel Blob** store holds UPI QR images, and **Groq**
 runs every AI model (chat, receipt reading, speech-to-text and read-aloud). Sign-in stays on **Clerk development keys**,
 so a small "Development mode" badge shows on the sign-in screen. That is expected.
 
@@ -58,14 +58,14 @@ Call them:
 6. Click **Deploy**. The build fails or the site errors at runtime, because there is no database or keys yet. Continue
    to step 2.
 
-`apps/web/vercel.json` already pins the functions to **`bom1` (Mumbai)**, next to the database. Hobby allows one region.
+`apps/web/vercel.json` already pins the functions to **`sin1` (Singapore)**, next to the database. Neon has no Mumbai region. Hobby allows one region.
 
-## 2. Create the Neon database (Mumbai) through Vercel
+## 2. Create the Neon database (Singapore) through Vercel
 
 1. Open the `coinflow-web` project and go to the **Storage** tab.
 2. Click **Create Database**, choose **Neon** (Serverless Postgres) and click **Continue**.
 3. Accept the terms, then choose:
-   - **Region:** `Asia Pacific (Mumbai)`, i.e. `aws-ap-south-1`.
+   - **Region:** `AWS Asia Pacific 1 (Singapore)`, i.e. `aws-ap-southeast-1`. Neon offers no Mumbai region.
    - **Plan:** Free.
    - **Name:** `coinflow`.
 4. When asked which environments to connect, keep **Production** (Preview and Development can stay on too).
@@ -110,7 +110,7 @@ Run the same command again after any future change that adds a migration, before
 2. Click **Create Database** (or **Create Store**), choose **Blob** and click **Continue**.
 3. Set **Access** to **Private**. This matters: a private store's files can't be opened by URL. Coinflow serves them
    only through `/api/v1/files/…`, and only to the owner and their group co-members.
-4. Name it `coinflow-qr`. For the region, choose Mumbai (`bom1`) if it's offered.
+4. Name it `coinflow-qr`. For the region, choose Singapore (`sin1`) if it's offered.
 5. Connect it to `coinflow-web` for **Production** (and Preview if you like).
 
 Connecting the store adds its credentials to `coinflow-web` automatically. Depending on the dashboard version, that is
@@ -133,7 +133,7 @@ Connect the store before you redeploy: variables only reach new deployments.
    - Vercel installs with `uv sync --no-dev --frozen` from `uv.lock`, without the optional `speech` extra (torch,
      faster-whisper, Kokoro). The production dependencies come to about 160 MB, under the 500 MB Python limit.
    - The app is served from `index.py`, as set by `[tool.vercel] entrypoint = "index:app"` in `pyproject.toml`.
-   - `apps/agent/vercel.json` sets the region `bom1`, the 300 s function limit and the daily cron.
+   - `apps/agent/vercel.json` sets the region `sin1`, the 300 s function limit and the daily cron.
 5. Click **Deploy**. Like the web project, it won't work until step 7.
 
 ## 6. Give the agent the database

@@ -421,11 +421,11 @@ The user asked to deploy with a working backend, frontend and AI features. Decis
 - **Sign-in:** Clerk development keys on `*.vercel.app`.
 - **Plan:** Vercel Hobby (free).
 
-**Shape.** Two Vercel projects from `aryannverse/coinflow`. Both run functions in `bom1` (Mumbai) to sit next to the database.
+**Shape.** Two Vercel projects from `aryannverse/coinflow`. Both run functions in `sin1` (Singapore) to sit next to the database. Neon offers no Mumbai region (checked 2026-10-13).
 - `coinflow-web`: root `apps/web`, Next.js.
 - `coinflow-agent`: root `apps/agent`, a FastAPI app on the Vercel Python runtime with no torch.
 
-**Database: Neon Postgres** via the Vercel Marketplace, region `aws-ap-south-1`.
+**Database: Neon Postgres** via the Vercel Marketplace, region `aws-ap-southeast-1` (Singapore).
 - The app uses the pooled URL (`DATABASE_URL`).
 - These use the direct URL (`DATABASE_URL_UNPOOLED`), because `LISTEN` doesn't work through Neon's pooler:
   - the notification bus;
