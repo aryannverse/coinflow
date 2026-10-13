@@ -46,24 +46,21 @@ const V_INSIGHTS = (
   </div>
 )
 
-const FEATURES: { title: string; body: string; span: string; Icon: ComponentType<{ className?: string }>; soon?: boolean; visual?: ReactNode }[] = [
+const FEATURES: { title: string; body: string; span: string; Icon: ComponentType<{ className?: string }>; visual?: ReactNode }[] = [
   { title: 'Three-tap logging', body: 'Amount, category, done. Or type “250 food lunch” anywhere with ⌘K.', span: 'md:col-span-2', Icon: Command, visual: V_LOG },
   { title: 'Undo everything', body: 'Every change has a 10-second undo. Mistakes cost nothing.', span: '', Icon: Undo2, visual: V_UNDO },
   { title: 'Bills you confirm', body: 'Rent and subscriptions show up as drafts — nothing counts until you say so.', span: '', Icon: CalendarCheck, visual: V_BILL },
   { title: 'Calm insights', body: 'Soft plans per category. Going over is information, not a red alarm.', span: 'md:col-span-2', Icon: LineChart, visual: V_INSIGHTS },
-  { title: 'Coming next: split with friends', body: 'Trips and dinners, itemised receipts, and the fewest payments to settle — with reasons.', span: 'md:col-span-3', Icon: Users, soon: true },
+  { title: 'Split with friends', body: 'Trips and dinners, itemised receipts, and the fewest payments to settle — with reasons.', span: 'md:col-span-3', Icon: Users },
 ]
 
-function TileBody({ title, body, Icon, soon, visual }: (typeof FEATURES)[number]) {
+function TileBody({ title, body, Icon, visual }: (typeof FEATURES)[number]) {
   return (
     <>
       <div className="flex items-center justify-between">
         <span aria-hidden className="grid size-11 place-items-center rounded-chip border bg-surface-2 text-primary">
           <Icon className="size-5" />
         </span>
-        {soon ? (
-          <span className="rounded-chip border bg-surface-2 px-2.5 py-1 font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">Soon</span>
-        ) : null}
       </div>
       <h3 className="mt-5 font-display text-2xl font-bold tracking-tight">{title}</h3>
       <p className="mt-2 max-w-prose text-pretty text-muted-foreground">{body}</p>
