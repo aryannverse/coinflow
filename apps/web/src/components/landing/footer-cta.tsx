@@ -11,7 +11,7 @@ export function FooterCta({ cta }: { cta: React.ReactNode }) {
         </h2>
         {cta}
         <p className="text-sm text-muted-foreground">
-          Coinflow · an HCI class project · your data stays in your database.
+          Coinflow · 2026 | Made with {'<3'} by Aryan Verma · your data stays in your database.
         </p>
         <nav aria-label="Footer" className="-mb-2 flex gap-2 text-sm">
           <Link href="/sign-in" className="flex min-h-12 items-center rounded-chip px-4 text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring">
